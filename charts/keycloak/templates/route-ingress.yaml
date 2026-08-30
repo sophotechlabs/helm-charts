@@ -1,0 +1,43 @@
+{{- if eq .Values.route.mode "ingress" }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "keycloak.fullname" . }}
+  labels:
+    {{- include "keycloak.labels" . | nindent 4 }}
+  {{- with (merge (dict) .Values.route.ingress.annotations .Values.commonAnnotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.route.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.route.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ include "keycloak.hostname" . }}
+      http:
+        paths:
+          - path: {{ .Values.route.ingress.path }}
+            pathType: {{ .Values.route.ingress.pathType }}
+            backend:
+              service:
+                name: {{ include "keycloak.fullname" . }}
+                port:
+                  number: {{ include "keycloak.servicePort" . }}
+    {{- range .Values.route.ingress.extraHosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: {{ .path | default "/" }}
+            pathType: {{ .pathType | default "Prefix" }}
+            backend:
+              service:
+                name: {{ include "keycloak.fullname" $ }}
+                port:
+                  number: {{ include "keycloak.servicePort" $ }}
+    {{- end }}
+{{- end }}

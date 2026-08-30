@@ -1,0 +1,53 @@
+{{- if eq .Values.route.mode "traefik" }}
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: {{ include "keycloak.fullname" . }}
+  labels:
+    {{- include "keycloak.labels" . | nindent 4 }}
+  {{- with (merge (dict) .Values.route.traefik.annotations .Values.commonAnnotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  entryPoints:
+    {{- toYaml .Values.route.traefik.entryPoints | nindent 4 }}
+  routes:
+    - match: Host(`{{ include "keycloak.hostname" . }}`)
+      kind: Rule
+      {{- with .Values.route.traefik.priority }}
+      priority: {{ . }}
+      {{- end }}
+      {{- with .Values.route.traefik.middlewares }}
+      middlewares:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      services:
+        - name: {{ include "keycloak.fullname" . }}
+          port: {{ include "keycloak.servicePort" . }}
+          scheme: {{ include "keycloak.serviceScheme" . }}
+          {{- if and (eq (include "keycloak.httpsEnabled" .) "true") .Values.route.traefik.serversTransport.create }}
+          serversTransport: {{ include "keycloak.fullname" . }}
+          {{- else if .Values.route.traefik.serversTransport.name }}
+          serversTransport: {{ .Values.route.traefik.serversTransport.name }}
+          {{- end }}
+  tls:
+    {{- toYaml .Values.route.traefik.tls | nindent 4 }}
+{{- if and (eq (include "keycloak.httpsEnabled" .) "true") .Values.route.traefik.serversTransport.create }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: {{ include "keycloak.fullname" . }}
+  labels:
+    {{- include "keycloak.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.route.traefik.serversTransport.insecureSkipVerify }}
+  insecureSkipVerify: true
+  {{- else }}
+  serverName: {{ printf "%s.%s.svc.cluster.local" (include "keycloak.fullname" .) .Release.Namespace }}
+  rootCAsSecrets:
+    - {{ required "route.traefik.serversTransport.rootCAsSecret is required when insecureSkipVerify is false" .Values.route.traefik.serversTransport.rootCAsSecret }}
+  {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,50 @@
+{{- if eq .Values.tls.mode "cert-manager" }}
+{{- if not .Values.tls.certManager.issuerRef.name }}
+{{- fail "tls.certManager.issuerRef.name is required when tls.mode is cert-manager" }}
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "keycloak.tlsSecretName" . }}
+  labels:
+    {{- include "keycloak.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  secretName: {{ include "keycloak.tlsSecretName" . }}
+  issuerRef:
+    kind: {{ .Values.tls.certManager.issuerRef.kind }}
+    name: {{ .Values.tls.certManager.issuerRef.name }}
+    {{- with .Values.tls.certManager.issuerRef.group }}
+    group: {{ . }}
+    {{- end }}
+  {{- with .Values.tls.certManager.duration }}
+  duration: {{ . }}
+  {{- end }}
+  {{- with .Values.tls.certManager.renewBefore }}
+  renewBefore: {{ . }}
+  {{- end }}
+  {{- with .Values.tls.certManager.privateKey }}
+  privateKey:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  dnsNames:
+    {{- if .Values.tls.certManager.dnsNames }}
+    {{- toYaml .Values.tls.certManager.dnsNames | nindent 4 }}
+    {{- else }}
+    {{/*
+    Default to the in-cluster names only. This certificate secures the hop
+    between the proxy and Keycloak; the public name is normally on a
+    certificate the proxy holds, not this one.
+    */}}
+    - {{ printf "%s.%s.svc.cluster.local" (include "keycloak.fullname" .) .Release.Namespace }}
+    - {{ printf "%s.%s.svc" (include "keycloak.fullname" .) .Release.Namespace }}
+    - {{ printf "%s.%s" (include "keycloak.fullname" .) .Release.Namespace }}
+    - {{ include "keycloak.fullname" . }}
+    {{- if or (eq .Values.controller.kind "StatefulSet") (gt (int .Values.controller.replicas) 1) }}
+    - {{ printf "*.%s.%s.svc.cluster.local" (include "keycloak.headlessServiceName" .) .Release.Namespace }}
+    {{- end }}
+    {{- end }}
+{{- end }}

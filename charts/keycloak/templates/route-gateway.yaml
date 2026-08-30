@@ -1,0 +1,36 @@
+{{- if eq .Values.route.mode "gateway" }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "keycloak.fullname" . }}
+  labels:
+    {{- include "keycloak.labels" . | nindent 4 }}
+  {{- with (merge (dict) .Values.route.gateway.annotations .Values.commonAnnotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- with .Values.route.gateway.parentRefs }}
+    {{- toYaml . | nindent 4 }}
+    {{- else }}
+    {{- fail "route.gateway.parentRefs is required when route.mode is gateway" }}
+    {{- end }}
+  hostnames:
+    - {{ include "keycloak.hostname" . | quote }}
+    {{- range .Values.route.gateway.extraHostnames }}
+    - {{ . | quote }}
+    {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: {{ .Values.route.gateway.path.type }}
+            value: {{ .Values.route.gateway.path.value }}
+      {{- with .Values.route.gateway.filters }}
+      filters:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      backendRefs:
+        - name: {{ include "keycloak.fullname" . }}
+          port: {{ include "keycloak.servicePort" . }}
+{{- end }}
