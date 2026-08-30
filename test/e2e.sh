@@ -52,8 +52,16 @@ apply_realm() {
     job -l "app.kubernetes.io/instance=$CONFIG_RELEASE,app.kubernetes.io/component=apply"
 }
 
-step "namespace and secrets"
-k get ns "$NS" >/dev/null 2>&1 || k create ns "$NS"
+step "reset"
+# From a known state every time. Keycloak's bootstrap admin only applies while
+# the master realm does not exist, so a second run against a surviving
+# namespace writes a fresh random password into the secret that the already
+# created account does not have — and every later step fails for a reason that
+# has nothing to do with the charts.
+if k get ns "$NS" >/dev/null 2>&1; then
+  k delete ns "$NS" --wait --timeout=5m
+fi
+k create ns "$NS"
 k -n "$NS" create secret generic keycloak-admin \
   --from-literal=password="$ADMIN_PASSWORD" \
   --dry-run=client -o yaml | k apply -f -
@@ -83,8 +91,23 @@ step "helm test keycloak"
 h test "$RELEASE" --namespace "$NS" --timeout 5m
 ok "health endpoints and master realm discovery answer"
 
+step "authenticate"
+# Ahead of the apply on purpose: config-cli's availability check retries for
+# five minutes and then reports a transport error, so a credential problem
+# surfaces here in seconds with the actual reason instead.
+k -n "$NS" exec "sts/$RELEASE-keycloak" -c keycloak -- \
+  /opt/keycloak/bin/kcadm.sh config credentials \
+  --config /tmp/kcadm.config \
+  --server http://localhost:8080 --realm master \
+  --user admin --password "$ADMIN_PASSWORD"
+ok "admin cli authenticated"
+
 step "apply a realm"
-cat > "$WORK/realm.yaml" <<EOF
+# Written by a function rather than edited later with sed or grep: removing a
+# user has to remove the whole block, and a line-wise edit that leaves an
+# orphaned firstName behind would attach it to whoever came before.
+write_realm() {
+  cat > "$1" <<EOF
 realm: $REALM
 enabled: true
 roles:
@@ -108,16 +131,32 @@ users:
   - username: alice
     enabled: true
     email: alice@e2e.test
+    emailVerified: true
+    firstName: Alice
+    lastName: Example
+    requiredActions: []
     credentials:
       - type: password
         value: \$(env:ALICE_PASSWORD)
         userLabel: initial
     groups:
       - /admins
+EOF
+  if [ "${2:-with-bob}" = "with-bob" ]; then
+    cat >> "$1" <<EOF
   - username: bob
     enabled: true
     email: bob@e2e.test
+    emailVerified: true
+    firstName: Bob
+    lastName: Example
+    requiredActions: []
 EOF
+  fi
+}
+
+write_realm "$WORK/realm.yaml"
+write_realm "$WORK/realm-no-bob.yaml" without-bob
 
 apply_realm \
   --set keycloak.url="http://$RELEASE-keycloak.$NS.svc.cluster.local:8080" \
@@ -134,35 +173,39 @@ step "helm test keycloak-config"
 h test "$CONFIG_RELEASE" --namespace "$NS" --timeout 5m
 ok "the realm matches the file"
 
-step "authenticate for the cross-release assertions"
-k -n "$NS" exec "sts/$RELEASE-keycloak" -c keycloak -- \
-  /opt/keycloak/bin/kcadm.sh config credentials \
-  --config /tmp/kcadm.config \
-  --server http://localhost:8080 --realm master \
-  --user admin --password "$ADMIN_PASSWORD"
-ok "admin cli authenticated"
-
 step "a password the user chose survives a reconcile"
-# userLabel: initial makes the credential create-only. Change it out of band,
-# re-apply the same realm, and a direct grant with the new password must still
-# work — which it will not if config-cli re-hashed the credential.
+# Measured on the credential itself rather than by trying to log in: a login
+# can fail for reasons that have nothing to do with the password (a pending
+# required action reads as "Account is not fully set up"), and a test that
+# cannot tell those apart would report the wrong cause.
+#
+# Keycloak replaces the credential when it re-hashes, so the credential id is
+# the direct evidence. Step two below proves the measurement is sensitive
+# before step four relies on it.
+alice_credential() {
+  ID=$(kcadm get users -r "$REALM" -q username=alice -q exact=true --fields id --format csv --noquotes | tr -d '\r')
+  [ -n "$ID" ] || fail "could not resolve alice"
+  kcadm get "users/$ID/credentials" -r "$REALM" --fields id --format csv --noquotes | tr -d '\r' | head -1
+}
+
+BEFORE=$(alice_credential)
+[ -n "$BEFORE" ] || fail "alice has no credential to start with"
+ok "credential before: $BEFORE"
+
 CHOSEN="alice-chose-this-$RANDOM$RANDOM"
 kcadm set-password -r "$REALM" --username alice --new-password "$CHOSEN"
-ok "password changed out of band"
+CHANGED=$(alice_credential)
+[ "$CHANGED" != "$BEFORE" ] || fail "changing the password out of band did not replace the credential, so this test cannot detect a rewrite"
+ok "password changed out of band, credential now $CHANGED"
 
 k -n "$NS" delete job -l "app.kubernetes.io/instance=$CONFIG_RELEASE,app.kubernetes.io/component=apply" --ignore-not-found
 apply_realm --reuse-values --set reconcile.cache=false --set-file realm.spec="$WORK/realm.yaml"
 
-k -n "$NS" exec "sts/$RELEASE-keycloak" -c keycloak -- \
-  /opt/keycloak/bin/kcadm.sh config credentials \
-  --config /tmp/alice.config \
-  --server http://localhost:8080 --realm "$REALM" \
-  --client admin-cli --user alice --password "$CHOSEN" \
-  || fail "alice's chosen password was reverted by the reconcile"
-ok "chosen password survived"
+AFTER=$(alice_credential)
+[ "$AFTER" = "$CHANGED" ] || fail "the reconcile replaced alice's credential ($CHANGED -> $AFTER), so userLabel: initial did not make it create-only"
+ok "credential unchanged by the reconcile: $AFTER"
 
 step "removing a user from the file takes their access away"
-grep -v -e 'username: bob' -e 'email: bob@e2e.test' "$WORK/realm.yaml" > "$WORK/realm-no-bob.yaml"
 k -n "$NS" delete job -l "app.kubernetes.io/instance=$CONFIG_RELEASE,app.kubernetes.io/component=apply" --ignore-not-found
 apply_realm --reuse-values --set prune.enabled=true --set-file realm.spec="$WORK/realm-no-bob.yaml"
 

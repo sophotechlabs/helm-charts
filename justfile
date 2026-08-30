@@ -7,7 +7,11 @@ kubeconform_schemas := 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/
 render_dir := justfile_directory() / 'dist/render'
 kind_dir := 'test/kind'
 kind_merged := '.tmp/kind'
-kind_cluster := env_var_or_default('HELM_CHARTS_KIND_CLUSTER', 'helm-charts')
+# On the CI box the session name is the cluster name, the lease and the reap
+# key, and the sweep matches it exactly — so a tier suffix there would leak the
+# cluster. Locally the suffix is what lets the two tiers coexist.
+kind_cluster := env_var_or_default('HELM_CHARTS_KIND_CLUSTER', env_var_or_default('SPINOZA_KIND_CLUSTER', 'helm-charts'))
+kind_session := env_var_or_default('SPINOZA_KIND_CLUSTER', '')
 
 # list recipes
 default:
@@ -157,6 +161,11 @@ kind-config tier:
     yq eval-all '. as $item ireduce ({}; . *+ $item)' "${chain[@]}" > {{ kind_merged }}/{{ tier }}.yaml
     echo "kind-config: {{ kind_merged }}/{{ tier }}.yaml is ${chain[*]} merged, $(yq '.nodes | length' {{ kind_merged }}/{{ tier }}.yaml) nodes"
 
+# the cluster name for a tier: the bare session name under CI, suffixed locally
+[private]
+cluster-name tier:
+    @if [ -n '{{ kind_session }}' ]; then echo '{{ kind_cluster }}'; else echo '{{ kind_cluster }}-{{ tier }}'; fi
+
 # create the cluster for a tier, idempotently
 [private]
 cluster-up tier:
@@ -164,14 +173,14 @@ cluster-up tier:
     set -euo pipefail
     just kind-config {{ tier }}
     config={{ kind_merged }}/{{ tier }}.yaml
-    name={{ kind_cluster }}-{{ tier }}
+    name=$(just cluster-name {{ tier }})
     if ! kind get clusters | grep -qx "$name"; then
         kind create cluster --name "$name" --config "$config" --wait 300s
     fi
     wanted=$(yq '.nodes | length' "$config")
     running=$(kind get nodes --name "$name" | wc -l | tr -d ' ')
     if [ "$running" != "$wanted" ]; then
-        echo "cluster $name runs $running nodes, not the $wanted in $config; just cluster-down {{ tier }} first"
+        echo "cluster $name runs $running nodes, not the $wanted in $config — it was built for a different tier; just cluster-down {{ tier }} first"
         exit 1
     fi
     kubectl --context "kind-$name" cluster-info
@@ -183,31 +192,27 @@ cluster-bare: (cluster-up 'bare')
 
 # a cluster with the operators the charts can drive
 cluster-e2e: (cluster-up 'e2e')
-    KUBECONFIG_CONTEXT=kind-{{ kind_cluster }}-e2e ./hack/install-operators.sh
+    KUBECONFIG_CONTEXT=kind-$(just cluster-name e2e) ./test/install-operators.sh
 
 cluster-down tier:
-    -kind delete cluster --name {{ kind_cluster }}-{{ tier }}
-
-# install the CRDs the render scenarios reference (schemas only, no controllers)
-crds:
-    ./hack/install-crds.sh
+    -kind delete cluster --name $(just cluster-name {{ tier }})
 
 # the claim the repo exists to make: a realm file in git becomes users, groups
 # and role mappings in a running Keycloak, a password the user chose survives a
 # reconcile, and a user removed from the file loses access
 e2e: cluster-e2e
-    KUBECONFIG_CONTEXT=kind-{{ kind_cluster }}-e2e ./hack/e2e.sh
+    KUBECONFIG_CONTEXT=kind-$(just cluster-name e2e) ./test/e2e.sh
 
 # the bare-cluster claim, on a cluster that genuinely has no CRDs
 e2e-bare: cluster-bare
-    KUBECONFIG_CONTEXT=kind-{{ kind_cluster }}-bare ./hack/e2e-bare.sh
+    KUBECONFIG_CONTEXT=kind-$(just cluster-name bare) ./test/e2e-bare.sh
 
 # ── hygiene ───────────────────────────────────────────────────────────────────
 
 hygiene:
     typos
     just editorconfig
-    shellcheck hack/*.sh
+    shellcheck test/*.sh
 
 editorconfig:
     #!/usr/bin/env bash

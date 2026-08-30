@@ -3,7 +3,7 @@
 # on a cluster that has none of the CRDs they can otherwise use.
 #
 # This has to run on a cluster where those CRDs are genuinely absent. Checking
-# it on the same cluster as hack/e2e.sh would prove nothing.
+# it on the same cluster as test/e2e.sh would prove nothing.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

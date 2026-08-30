@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Installs the operators the end-to-end run needs to actually work, as opposed
-# to hack/install-crds.sh which installs only the schemas the render checks
-# validate against.
+# Installs the operators the end-to-end run needs to actually work. The render
+# checks do not need this: they validate against the CRD schema catalog rather
+# than against a cluster.
 set -euo pipefail
 
 CNPG_VERSION="${CNPG_VERSION:-1.28.1}"
