@@ -1,0 +1,127 @@
+---
+name: publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, for example keycloak-v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # Keyless signing: the certificate is issued against this workflow's
+      # identity, so there is no private key to hold or rotate.
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518
+        with:
+          # This job publishes an artifact, so a poisoned tool cache would be
+          # a poisoned release.
+          cache: false
+
+      - name: Work out which chart this tag releases
+        id: chart
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          set -euo pipefail
+          # release-please tags each package as <component>-v<version>.
+          if [[ ! "$TAG" =~ ^(.+)-v([0-9]+\.[0-9]+\.[0-9]+.*)$ ]]; then
+            echo "::error::tag $TAG is not <chart>-v<version>"
+            exit 1
+          fi
+          name="${BASH_REMATCH[1]}"
+          version="${BASH_REMATCH[2]}"
+          if [ ! -f "charts/$name/Chart.yaml" ]; then
+            echo "::error::no chart at charts/$name"
+            exit 1
+          fi
+          declared=$(yq -r '.version' "charts/$name/Chart.yaml")
+          if [ "$declared" != "$version" ]; then
+            echo "::error::tag says $version but charts/$name/Chart.yaml says $declared"
+            exit 1
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Package
+        env:
+          NAME: ${{ steps.chart.outputs.name }}
+        run: helm package "charts/${NAME}" -d dist
+
+      - name: Log in to ghcr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GITHUB_TOKEN" | helm registry login ghcr.io \
+            --username "$ACTOR" --password-stdin
+
+      - name: Push
+        id: push
+        env:
+          NAME: ${{ steps.chart.outputs.name }}
+          VERSION: ${{ steps.chart.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          # helm push takes the repository path with no chart name; the chart
+          # lands at <path>/<chart name>:<version>.
+          helm push "dist/${NAME}-${VERSION}.tgz" \
+            "oci://ghcr.io/${OWNER}/charts" 2>&1 | tee push.out
+          digest=$(grep -oE 'sha256:[0-9a-f]{64}' push.out | head -1)
+          if [ -z "$digest" ]; then
+            echo "::error::could not read the pushed digest"
+            exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Sign
+        env:
+          NAME: ${{ steps.chart.outputs.name }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          cosign sign --yes \
+            "ghcr.io/${OWNER}/charts/${NAME}@${DIGEST}"
+
+      - name: Verify what was just published
+        env:
+          NAME: ${{ steps.chart.outputs.name }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Publishing and then not checking would leave a broken signature
+          # undiscovered until someone tried to install it.
+          cosign verify \
+            --certificate-identity-regexp "^https://github\.com/${REPO}/" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "ghcr.io/${OWNER}/charts/${NAME}@${DIGEST}"
+
+      - name: Attach the package to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/*.tgz --clobber

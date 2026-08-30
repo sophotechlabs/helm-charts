@@ -3,7 +3,7 @@ apiVersion: v2
 name: keycloak
 description: Keycloak, with its database, certificate, route and backups optional rather than assumed
 type: application
-version: 0.1.0
+version: 0.0.0
 appVersion: "26.7.2"
 home: https://github.com/sophotechlabs/helm-charts
 icon: https://raw.githubusercontent.com/keycloak/keycloak-misc/main/logo/icon.svg

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "separate-pull-requests": true,
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "chore", "section": "Miscellaneous" },
+    { "type": "ci", "section": "CI" },
+    { "type": "docs", "section": "Documentation" },
+    { "type": "refactor", "section": "Refactoring" },
+    { "type": "test", "section": "Tests" },
+    { "type": "build", "section": "Build" },
+    { "type": "revert", "section": "Reverts" }
+  ],
+  "packages": {
+    "charts/keycloak": {
+      "release-type": "helm",
+      "component": "keycloak"
+    },
+    "charts/keycloak-config": {
+      "release-type": "helm",
+      "component": "keycloak-config"
+    }
+  }
+}
