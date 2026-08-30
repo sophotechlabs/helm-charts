@@ -1,0 +1,50 @@
+{{- if .Values.tests.enabled }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "keycloak.fullname" . }}-test-health
+  labels:
+    {{- include "keycloak.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  {{- with .Values.image.pullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: probe
+      image: {{ printf "%s:%s" .Values.tests.image.repository .Values.tests.image.tag }}
+      imagePullPolicy: {{ .Values.tests.image.pullPolicy }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi
+        limits:
+          memory: 64Mi
+      command:
+        - /bin/sh
+        - -ec
+        - |
+          {{- $mgmt := printf "%s://%s:%v" .Values.keycloak.httpManagementScheme (include "keycloak.metricsServiceName" .) .Values.keycloak.managementPort }}
+          {{- $app := printf "%s://%s:%v" (include "keycloak.serviceScheme" .) (include "keycloak.fullname" .) (include "keycloak.servicePort" .) }}
+          curl -fsS {{ if eq (include "keycloak.serviceScheme" .) "https" }}-k {{ end }}"{{ $mgmt }}/health/ready" > /dev/null
+          echo "health/ready ok"
+          curl -fsS {{ if eq (include "keycloak.serviceScheme" .) "https" }}-k {{ end }}"{{ $app }}{{ .Values.keycloak.httpRelativePath | trimSuffix "/" }}/realms/master/.well-known/openid-configuration" > /dev/null
+          echo "master realm discovery ok"
+{{- end }}
