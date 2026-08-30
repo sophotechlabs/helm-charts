@@ -1,0 +1,126 @@
+{{- if .Values.tests.enabled }}
+{{- $realm := fromYaml (include "keycloak-config.realmText" .) }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "keycloak-config.fullname" . }}-test-realm
+  labels:
+    {{- include "keycloak-config.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.podSecurityContext }}
+  securityContext:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  containers:
+    - name: assert
+      image: {{ include "keycloak-config.keycloakImage" . }}
+      imagePullPolicy: {{ .Values.keycloakImage.pullPolicy }}
+      envFrom:
+        - configMapRef:
+            name: {{ include "keycloak-config.envConfigMapName" . }}
+      env:
+        {{- if eq .Values.auth.mode "password" }}
+        - name: KC_CLI_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.auth.existingSecret }}
+              key: {{ .Values.auth.passwordKey }}
+        {{- else }}
+        - name: KC_CLI_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.auth.existingSecret }}
+              key: {{ .Values.auth.clientSecretKey }}
+        {{- end }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop:
+            - ALL
+      resources:
+        requests:
+          cpu: 50m
+          memory: 256Mi
+        limits:
+          memory: 512Mi
+      volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      command:
+        - /bin/sh
+        - -ec
+        - |
+          {{/*
+          The expected sets are rendered by Helm out of the same realm text
+          config-cli applied, so this asserts the server matches the file
+          rather than asserting the file matches itself.
+          */}}
+          KC=/opt/keycloak/bin/kcadm.sh
+          CFG=/tmp/kcadm.config
+          REALM="{{ $realm.realm }}"
+
+          {{- if eq .Values.auth.mode "password" }}
+          "$KC" config credentials --config "$CFG" \
+            --server "$KEYCLOAK_URL" --realm "$KEYCLOAK_LOGINREALM" --user "$KEYCLOAK_USER"
+          {{- else }}
+          "$KC" config credentials --config "$CFG" \
+            --server "$KEYCLOAK_URL" --realm "$KEYCLOAK_LOGINREALM" --client "$KEYCLOAK_CLIENTID"
+          {{- end }}
+
+          fail() { echo "FAIL: $1" >&2; exit 1; }
+
+          "$KC" get "realms/$REALM" --config "$CFG" --fields realm --format csv --noquotes \
+            | grep -qx "$REALM" || fail "realm $REALM does not exist"
+          echo "ok  realm $REALM"
+
+          {{- range $realm.users }}
+          {{- $username := .username }}
+          "$KC" get users -r "$REALM" --config "$CFG" \
+            -q username={{ $username | quote }} -q exact=true \
+            --fields username --format csv --noquotes \
+            | grep -qx {{ $username | quote }} || fail "user {{ $username }} is missing"
+          echo "ok  user {{ $username }}"
+          {{- if .groups }}
+          ID=$("$KC" get users -r "$REALM" --config "$CFG" \
+            -q username={{ $username | quote }} -q exact=true \
+            --fields id --format csv --noquotes)
+          [ -n "$ID" ] || fail "could not resolve {{ $username }}"
+          {{- range .groups }}
+          "$KC" get "users/$ID/groups" -r "$REALM" --config "$CFG" \
+            --fields name --format csv --noquotes \
+            | grep -qx {{ base . | quote }} || fail "user {{ $username }} is not in group {{ . }}"
+          echo "ok  {{ $username }} in {{ . }}"
+          {{- end }}
+          {{- end }}
+          {{- end }}
+
+          {{- range $realm.clients }}
+          "$KC" get clients -r "$REALM" --config "$CFG" \
+            -q clientId={{ .clientId | quote }} \
+            --fields clientId --format csv --noquotes \
+            | grep -qx {{ .clientId | quote }} || fail "client {{ .clientId }} is missing"
+          echo "ok  client {{ .clientId }}"
+          {{- end }}
+
+          {{- range $realm.groups }}
+          "$KC" get groups -r "$REALM" --config "$CFG" \
+            --fields name --format csv --noquotes \
+            | grep -qx {{ .name | quote }} || fail "group {{ .name }} is missing"
+          echo "ok  group {{ .name }}"
+          {{- end }}
+
+          echo "realm matches the file"
+  volumes:
+    - name: tmp
+      emptyDir: {}
+{{- end }}

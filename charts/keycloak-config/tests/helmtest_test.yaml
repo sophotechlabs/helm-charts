@@ -1,0 +1,96 @@
+suite: helm test hook
+templates:
+  - templates/tests/realm.yaml
+set:
+  keycloak.url: http://keycloak:8080
+  auth.existingSecret: keycloak-admin
+  substitution.existingSecret: realm-secrets
+  realm.spec: |
+    realm: demo
+    groups:
+      - name: admins
+    clients:
+      - clientId: grafana
+    users:
+      - username: alice
+        credentials:
+          - type: password
+            value: hunter2
+            userLabel: initial
+        groups:
+          - /admins
+      - username: bob
+tests:
+  - it: is a helm test hook, cleaned up after it passes
+    asserts:
+      - isKind:
+          of: Pod
+      - equal:
+          path: metadata.annotations["helm.sh/hook"]
+          value: test
+      - equal:
+          path: metadata.annotations["helm.sh/hook-delete-policy"]
+          value: before-hook-creation,hook-succeeded
+
+  # The expected sets are rendered by Helm from the same realm text config-cli
+  # applied, so the assertion is server-against-file rather than file-against-
+  # itself.
+  - it: asserts every user in the file
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: user alice is missing
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: user bob is missing
+
+  - it: asserts group membership for users that declare it
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: user alice is not in group /admins
+
+  - it: asserts clients and groups
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: client grafana is missing
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: group admins is missing
+
+  # -r acts on a realm; --realm would only say which realm to log in to.
+  - it: queries the target realm, not the login realm
+    asserts:
+      - matchRegex:
+          path: spec.containers[0].command[2]
+          pattern: get users -r "\$REALM"
+
+  - it: reads its credential from the environment rather than a flag
+    asserts:
+      - contains:
+          path: spec.containers[0].env
+          content:
+            name: KC_CLI_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: keycloak-admin
+                key: password
+
+  - it: runs read-only with a writable tmp for the cli config
+    asserts:
+      - equal:
+          path: spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - contains:
+          path: spec.volumes
+          content:
+            name: tmp
+            emptyDir: {}
+
+  - it: can be turned off
+    set:
+      tests.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

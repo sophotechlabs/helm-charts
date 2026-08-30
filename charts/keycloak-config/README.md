@@ -117,6 +117,7 @@ config-cli's image tag carries the Keycloak version its admin client was built a
 | substitution.enabled | bool | `true` | Resolve `$(env:NAME)` placeholders in the realm from environment variables. This is how client secrets and user passwords stay out of the realm file. |
 | substitution.existingSecret | string | `""` | Secret whose keys become environment variables for the substitution. Every key in it is exposed, so keep it to realm values. |
 | substitution.extraEnv | list | `[]` | Extra environment variables for substitution. |
+| tests.enabled | bool | `true` | Render the `helm test` pod. It reads the realm back from Keycloak and asserts it matches the file, using the expected sets Helm renders out of that same file. |
 | tolerations | list | `[]` | Tolerations for the jobs. |
 
 ## Maintainers

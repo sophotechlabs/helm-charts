@@ -3,11 +3,18 @@
   "title": "keycloak-config",
   "type": "object",
   "properties": {
-    "nameOverride": { "type": "string" },
-    "fullnameOverride": { "type": "string" },
-    "commonLabels": { "type": "object" },
-    "commonAnnotations": { "type": "object" },
-
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "commonLabels": {
+      "type": "object"
+    },
+    "commonAnnotations": {
+      "type": "object"
+    },
     "keycloak": {
       "type": "object",
       "properties": {
@@ -16,46 +23,101 @@
           "pattern": "^(|https?://.+)$",
           "description": "Prefer the in-cluster Service over http; the admin client does not follow a 308."
         },
-        "authRealm": { "type": "string", "minLength": 1 }
+        "authRealm": {
+          "type": "string",
+          "minLength": 1
+        }
       },
-      "required": ["url", "authRealm"]
+      "required": [
+        "url",
+        "authRealm"
+      ]
     },
-
     "auth": {
       "type": "object",
       "properties": {
-        "mode": { "enum": ["password", "client"] },
-        "existingSecret": { "type": "string", "minLength": 1 },
-        "username": { "type": "string" },
-        "passwordKey": { "type": "string" },
-        "clientId": { "type": "string" },
-        "clientSecretKey": { "type": "string" }
+        "mode": {
+          "enum": [
+            "password",
+            "client"
+          ]
+        },
+        "existingSecret": {
+          "type": "string",
+          "minLength": 1
+        },
+        "username": {
+          "type": "string"
+        },
+        "passwordKey": {
+          "type": "string"
+        },
+        "clientId": {
+          "type": "string"
+        },
+        "clientSecretKey": {
+          "type": "string"
+        }
       },
-      "required": ["mode", "existingSecret"],
+      "required": [
+        "mode",
+        "existingSecret"
+      ],
       "allOf": [
         {
-          "if": { "properties": { "mode": { "const": "password" } }, "required": ["mode"] },
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "password"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
           "then": {
             "properties": {
-              "username": { "minLength": 1 },
-              "passwordKey": { "minLength": 1 }
+              "username": {
+                "minLength": 1
+              },
+              "passwordKey": {
+                "minLength": 1
+              }
             },
-            "required": ["username", "passwordKey"]
+            "required": [
+              "username",
+              "passwordKey"
+            ]
           }
         },
         {
-          "if": { "properties": { "mode": { "const": "client" } }, "required": ["mode"] },
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "client"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
           "then": {
             "properties": {
-              "clientId": { "minLength": 1 },
-              "clientSecretKey": { "minLength": 1 }
+              "clientId": {
+                "minLength": 1
+              },
+              "clientSecretKey": {
+                "minLength": 1
+              }
             },
-            "required": ["clientId", "clientSecretKey"]
+            "required": [
+              "clientId",
+              "clientSecretKey"
+            ]
           }
         }
       ]
     },
-
     "realm": {
       "type": "object",
       "properties": {
@@ -63,133 +125,284 @@
           "type": "string",
           "description": "Supply by path: --set-file realm.spec=./realm.yaml, or Flux valuesFrom with targetPath: realm.spec."
         },
-        "template": { "type": "boolean" }
+        "template": {
+          "type": "boolean"
+        }
       },
-      "required": ["spec"]
+      "required": [
+        "spec"
+      ]
     },
-
     "substitution": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "existingSecret": { "type": "string" },
-        "extraEnv": { "type": "array" }
+        "enabled": {
+          "type": "boolean"
+        },
+        "existingSecret": {
+          "type": "string"
+        },
+        "extraEnv": {
+          "type": "array"
+        }
       }
     },
-
     "reconcile": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "schedule": { "type": "string", "minLength": 1 },
-        "timeZone": { "type": "string" },
+        "enabled": {
+          "type": "boolean"
+        },
+        "schedule": {
+          "type": "string",
+          "minLength": 1
+        },
+        "timeZone": {
+          "type": "string"
+        },
         "cache": {
           "type": "boolean",
           "description": "true makes the schedule re-apply only after the file changes, which is not drift correction."
         },
-        "successfulJobsHistoryLimit": { "type": "integer", "minimum": 0 },
-        "failedJobsHistoryLimit": { "type": "integer", "minimum": 0 },
-        "startingDeadlineSeconds": { "type": "integer", "minimum": 0 },
-        "backoffLimit": { "type": "integer", "minimum": 0 }
+        "successfulJobsHistoryLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failedJobsHistoryLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "startingDeadlineSeconds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "backoffLimit": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
-
     "apply": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "backoffLimit": { "type": "integer", "minimum": 0 },
-        "ttlSecondsAfterFinished": { "type": "integer", "minimum": 0 }
+        "enabled": {
+          "type": "boolean"
+        },
+        "backoffLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ttlSecondsAfterFinished": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
-
     "prune": {
       "type": "object",
       "properties": {
-        "enabled": { "type": "boolean" },
-        "exclude": { "type": "array", "items": { "type": "string" } },
-        "pageSize": { "type": "integer", "minimum": 1, "maximum": 1000 }
+        "enabled": {
+          "type": "boolean"
+        },
+        "exclude": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pageSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
       }
     },
-
     "configCli": {
       "type": "object",
       "properties": {
         "image": {
           "type": "object",
           "properties": {
-            "registry": { "type": "string" },
-            "repository": { "type": "string", "minLength": 1 },
-            "tag": { "type": "string", "minLength": 1, "not": { "const": "latest" } },
-            "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+            "registry": {
+              "type": "string"
+            },
+            "repository": {
+              "type": "string",
+              "minLength": 1
+            },
+            "tag": {
+              "type": "string",
+              "minLength": 1,
+              "not": {
+                "const": "latest"
+              }
+            },
+            "pullPolicy": {
+              "enum": [
+                "Always",
+                "IfNotPresent",
+                "Never"
+              ]
+            }
           }
         },
         "availabilityCheck": {
           "type": "object",
           "properties": {
-            "enabled": { "type": "boolean" },
-            "timeout": { "type": "string", "pattern": "^[0-9]+(h|m|s|ms)$" }
+            "enabled": {
+              "type": "boolean"
+            },
+            "timeout": {
+              "type": "string",
+              "pattern": "^[0-9]+(h|m|s|ms)$"
+            }
           }
         },
         "managed": {
           "type": "object",
           "properties": {
-            "authenticationFlow": { "$ref": "#/$defs/managed" },
-            "identityProvider": { "$ref": "#/$defs/managed" },
-            "identityProviderMapper": { "$ref": "#/$defs/managed" },
-            "client": { "$ref": "#/$defs/managed" },
-            "clientScope": { "$ref": "#/$defs/managed" },
-            "group": { "$ref": "#/$defs/managed" },
-            "requiredAction": { "$ref": "#/$defs/managed" },
-            "role": { "$ref": "#/$defs/managed" },
-            "scopeMapping": { "$ref": "#/$defs/managed" },
-            "subGroup": { "$ref": "#/$defs/managed" }
+            "authenticationFlow": {
+              "$ref": "#/$defs/managed"
+            },
+            "identityProvider": {
+              "$ref": "#/$defs/managed"
+            },
+            "identityProviderMapper": {
+              "$ref": "#/$defs/managed"
+            },
+            "client": {
+              "$ref": "#/$defs/managed"
+            },
+            "clientScope": {
+              "$ref": "#/$defs/managed"
+            },
+            "group": {
+              "$ref": "#/$defs/managed"
+            },
+            "requiredAction": {
+              "$ref": "#/$defs/managed"
+            },
+            "role": {
+              "$ref": "#/$defs/managed"
+            },
+            "scopeMapping": {
+              "$ref": "#/$defs/managed"
+            },
+            "subGroup": {
+              "$ref": "#/$defs/managed"
+            }
           }
         },
-        "extraEnv": { "type": "array" },
-        "logLevel": { "enum": ["trace", "debug", "info", "warn", "error"] }
+        "extraEnv": {
+          "type": "array"
+        },
+        "logLevel": {
+          "enum": [
+            "trace",
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ]
+        }
       }
     },
-
     "keycloakImage": {
       "type": "object",
       "properties": {
-        "registry": { "type": "string" },
-        "repository": { "type": "string", "minLength": 1 },
-        "tag": { "type": "string", "minLength": 1, "not": { "const": "latest" } },
-        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+        "registry": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tag": {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "const": "latest"
+          }
+        },
+        "pullPolicy": {
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        }
       }
     },
-
-    "imagePullSecrets": { "type": "array" },
-
+    "imagePullSecrets": {
+      "type": "array"
+    },
     "serviceAccount": {
       "type": "object",
       "properties": {
-        "create": { "type": "boolean" },
-        "name": { "type": "string" },
-        "annotations": { "type": "object" }
+        "create": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object"
+        }
       }
     },
-
-    "podSecurityContext": { "type": "object" },
-    "containerSecurityContext": { "type": "object" },
-    "resources": { "type": "object" },
-    "pruneResources": { "type": "object" },
-    "nodeSelector": { "type": "object" },
-    "tolerations": { "type": "array" },
-    "affinity": { "type": "object" },
-    "priorityClassName": { "type": "string" },
-    "extraVolumes": { "type": "array" },
-    "extraVolumeMounts": { "type": "array" },
-    "extraObjects": { "type": "array" }
+    "podSecurityContext": {
+      "type": "object"
+    },
+    "containerSecurityContext": {
+      "type": "object"
+    },
+    "resources": {
+      "type": "object"
+    },
+    "pruneResources": {
+      "type": "object"
+    },
+    "nodeSelector": {
+      "type": "object"
+    },
+    "tolerations": {
+      "type": "array"
+    },
+    "affinity": {
+      "type": "object"
+    },
+    "priorityClassName": {
+      "type": "string"
+    },
+    "extraVolumes": {
+      "type": "array"
+    },
+    "extraVolumeMounts": {
+      "type": "array"
+    },
+    "extraObjects": {
+      "type": "array"
+    },
+    "tests": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    }
   },
-
-  "required": ["keycloak", "auth", "realm"],
-
+  "required": [
+    "keycloak",
+    "auth",
+    "realm"
+  ],
   "$defs": {
     "managed": {
-      "enum": ["full", "no-delete"],
+      "enum": [
+        "full",
+        "no-delete"
+      ],
       "description": "full deletes entities absent from the file; no-delete leaves them."
     }
   }

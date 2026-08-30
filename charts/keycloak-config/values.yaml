@@ -212,5 +212,11 @@ extraVolumes: []
 # -- Extra volume mounts on the config-cli container.
 extraVolumeMounts: []
 
+tests:
+  # -- Render the `helm test` pod. It reads the realm back from Keycloak and
+  # asserts it matches the file, using the expected sets Helm renders out of
+  # that same file.
+  enabled: true
+
 # -- Arbitrary extra manifests, rendered through `tpl`.
 extraObjects: []
