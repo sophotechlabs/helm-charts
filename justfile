@@ -29,7 +29,11 @@ deps:
         echo "helm-unittest already installed"
         exit 0
     fi
-    helm plugin install https://github.com/helm-unittest/helm-unittest --version "${HELM_UNITTEST_VERSION:-1.1.2}"
+    # Helm 4 verifies plugin provenance by default and helm-unittest's release
+    # does not publish any, so the install refuses without this. The version is
+    # pinned above, which is what actually fixes which artifact is fetched.
+    helm plugin install https://github.com/helm-unittest/helm-unittest \
+        --version "${HELM_UNITTEST_VERSION:-1.1.2}" --verify=false
 
 # ── charts ────────────────────────────────────────────────────────────────────
 
