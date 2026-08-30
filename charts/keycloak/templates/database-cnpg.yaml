@@ -1,0 +1,90 @@
+{{- if eq .Values.database.mode "cnpg" }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "keycloak.databaseClusterName" . }}
+  labels:
+    {{- include "keycloak.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+  annotations:
+    {{- if .Values.database.cnpg.retainOnDelete }}
+    {{/*
+    A database outliving the release it was created by is the safer default.
+    Set database.cnpg.retainOnDelete=false if you want `helm uninstall` to take
+    the cluster and its volumes with it.
+    */}}
+    helm.sh/resource-policy: keep
+    {{- end }}
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  instances: {{ .Values.database.cnpg.instances }}
+  {{- with .Values.database.cnpg.imageName }}
+  imageName: {{ . }}
+  {{- end }}
+  {{- with .Values.database.cnpg.imageCatalogRef }}
+  imageCatalogRef:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if le (int .Values.database.cnpg.instances) 1 }}
+  enablePDB: false
+  {{- end }}
+  {{- with .Values.database.cnpg.priorityClassName }}
+  priorityClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.database.cnpg.postgresql }}
+  postgresql:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  storage:
+    size: {{ .Values.database.cnpg.storage.size }}
+    {{- with .Values.database.cnpg.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  {{- with .Values.database.cnpg.walStorage }}
+  walStorage:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.database.cnpg.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.database.cnpg.affinity }}
+  affinity:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.database.cnpg.database }}
+      owner: {{ .Values.database.cnpg.owner }}
+      {{- with .Values.database.cnpg.initdb }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+  {{- with .Values.database.cnpg.backup }}
+  backup:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- if .Values.database.cnpg.podMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "keycloak.databaseClusterName" . }}
+  labels:
+    {{- include "keycloak.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+    {{- with .Values.database.cnpg.podMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: {{ include "keycloak.databaseClusterName" . }}
+  podMetricsEndpoints:
+    - port: metrics
+      {{- with .Values.database.cnpg.podMonitor.interval }}
+      interval: {{ . }}
+      {{- end }}
+{{- end }}
+{{- end }}
