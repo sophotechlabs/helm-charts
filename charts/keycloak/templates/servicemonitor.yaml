@@ -1,7 +1,4 @@
 {{- if .Values.metrics.serviceMonitor.enabled }}
-{{- if not .Values.metrics.enabled }}
-{{- fail "metrics.serviceMonitor.enabled requires metrics.enabled" }}
-{{- end }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -29,7 +26,7 @@ spec:
   endpoints:
     - port: management
       path: {{ .Values.metrics.path }}
-      scheme: {{ .Values.keycloak.httpManagementScheme }}
+      scheme: {{ include "keycloak.healthScheme" . | lower }}
       {{- with .Values.metrics.serviceMonitor.interval }}
       interval: {{ . }}
       {{- end }}

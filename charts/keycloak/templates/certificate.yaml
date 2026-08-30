@@ -32,19 +32,22 @@ spec:
   {{- end }}
   dnsNames:
     {{- if .Values.tls.certManager.dnsNames }}
-    {{- toYaml .Values.tls.certManager.dnsNames | nindent 4 }}
+    {{- range .Values.tls.certManager.dnsNames }}
+    - {{ . | quote }}
+    {{- end }}
     {{- else }}
     {{/*
     Default to the in-cluster names only. This certificate secures the hop
     between the proxy and Keycloak; the public name is normally on a
     certificate the proxy holds, not this one.
     */}}
-    - {{ printf "%s.%s.svc.cluster.local" (include "keycloak.fullname" .) .Release.Namespace }}
-    - {{ printf "%s.%s.svc" (include "keycloak.fullname" .) .Release.Namespace }}
-    - {{ printf "%s.%s" (include "keycloak.fullname" .) .Release.Namespace }}
-    - {{ include "keycloak.fullname" . }}
+    - {{ printf "%s.%s.svc.cluster.local" (include "keycloak.fullname" .) .Release.Namespace | quote }}
+    - {{ printf "%s.%s.svc" (include "keycloak.fullname" .) .Release.Namespace | quote }}
+    - {{ printf "%s.%s" (include "keycloak.fullname" .) .Release.Namespace | quote }}
+    - {{ include "keycloak.fullname" . | quote }}
     {{- if or (eq .Values.controller.kind "StatefulSet") (gt (int .Values.controller.replicas) 1) }}
-    - {{ printf "*.%s.%s.svc.cluster.local" (include "keycloak.headlessServiceName" .) .Release.Namespace }}
+    {{/* A bare *.name is a YAML alias, so this one has to be quoted. */}}
+    - {{ printf "*.%s.%s.svc.cluster.local" (include "keycloak.headlessServiceName" .) .Release.Namespace | quote }}
     {{- end }}
     {{- end }}
 {{- end }}

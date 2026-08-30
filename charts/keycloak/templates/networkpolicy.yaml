@@ -43,10 +43,10 @@ spec:
     cache silently fails to form once a policy is in place.
     */}}
     - ports:
-        {{- range .Values.networkPolicy.clusterPorts }}
-        - port: {{ . }}
+        - port: {{ .Values.cache.bindPort }}
           protocol: TCP
-        {{- end }}
+        - port: {{ add (int .Values.cache.bindPort) 50000 }}
+          protocol: TCP
       from:
         - podSelector:
             matchLabels:

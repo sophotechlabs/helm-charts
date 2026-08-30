@@ -6,18 +6,19 @@ metadata:
   labels:
     {{- include "keycloak.labels" . | nindent 4 }}
     app.kubernetes.io/component: database
+  {{/*
+  A database outliving the release it was created by is the safer default.
+  Set database.cnpg.retainOnDelete=false if you want `helm uninstall` to take
+  the cluster and its volumes with it.
+  */}}
+  {{- $annotations := deepCopy .Values.commonAnnotations }}
+  {{- if .Values.database.cnpg.retainOnDelete }}
+  {{- $annotations = merge (dict "helm.sh/resource-policy" "keep") $annotations }}
+  {{- end }}
+  {{- with $annotations }}
   annotations:
-    {{- if .Values.database.cnpg.retainOnDelete }}
-    {{/*
-    A database outliving the release it was created by is the safer default.
-    Set database.cnpg.retainOnDelete=false if you want `helm uninstall` to take
-    the cluster and its volumes with it.
-    */}}
-    helm.sh/resource-policy: keep
-    {{- end }}
-    {{- with .Values.commonAnnotations }}
     {{- toYaml . | nindent 4 }}
-    {{- end }}
+  {{- end }}
 spec:
   instances: {{ .Values.database.cnpg.instances }}
   {{- with .Values.database.cnpg.imageName }}

@@ -1,4 +1,4 @@
-{{- if or .Values.metrics.enabled .Values.keycloak.health.enabled }}
+{{- if eq (include "keycloak.managementEnabled" .) "true" }}
 {{/*
 The management port carries health and metrics. It is deliberately a separate
 Service from the one a route points at, so /metrics is not reachable through
@@ -19,7 +19,7 @@ spec:
   type: ClusterIP
   ports:
     - name: management
-      port: {{ .Values.keycloak.managementPort }}
+      port: {{ .Values.keycloak.management.port }}
       targetPort: management
       protocol: TCP
   selector:
