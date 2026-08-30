@@ -1,0 +1,30 @@
+---
+apiVersion: v2
+name: keycloak
+description: Keycloak, with its database, certificate, route and backups optional rather than assumed
+type: application
+version: 0.1.0
+appVersion: "26.7.2"
+home: https://github.com/sophotechlabs/helm-charts
+icon: https://raw.githubusercontent.com/keycloak/keycloak-misc/main/logo/icon.svg
+sources:
+  - https://github.com/sophotechlabs/helm-charts/tree/main/charts/keycloak
+  - https://github.com/keycloak/keycloak
+keywords:
+  - keycloak
+  - identity
+  - authentication
+  - authorization
+  - oidc
+  - saml
+maintainers:
+  - name: Sophotech s.r.o.
+    url: https://sopho.tech
+annotations:
+  artifacthub.io/category: security
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: Keycloak
+      url: https://www.keycloak.org
+    - name: Chart source
+      url: https://github.com/sophotechlabs/helm-charts/tree/main/charts/keycloak
