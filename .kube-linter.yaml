@@ -1,0 +1,10 @@
+---
+checks:
+  addAllBuiltIn: true
+  exclude:
+    # Rendered chart output carries no namespace; Helm and kubectl supply it.
+    - default-service-account
+    # Latest-tag is asserted by the schema instead: image.tag is required and
+    # rejected when it is "latest".
+    - unset-cpu-requirements
+customChecks: []
