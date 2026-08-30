@@ -1,0 +1,502 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "keycloak",
+  "type": "object",
+  "properties": {
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "commonLabels": { "type": "object" },
+    "commonAnnotations": { "type": "object" },
+
+    "image": {
+      "type": "object",
+      "properties": {
+        "registry": { "type": "string" },
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": {
+          "type": "string",
+          "not": { "const": "latest" },
+          "description": "A moving tag makes a release irreproducible."
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^(|sha256:[0-9a-f]{64})$"
+        },
+        "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] },
+        "pullSecrets": { "type": "array" },
+        "builtWith": {
+          "type": "object",
+          "properties": {
+            "healthEnabled": { "type": "boolean" },
+            "metricsEnabled": { "type": "boolean" }
+          }
+        }
+      },
+      "required": ["repository"]
+    },
+
+    "controller": {
+      "type": "object",
+      "properties": {
+        "kind": { "enum": ["StatefulSet", "Deployment"] },
+        "replicas": { "type": "integer", "minimum": 0 },
+        "revisionHistoryLimit": { "type": "integer", "minimum": 0 },
+        "podManagementPolicy": { "enum": ["OrderedReady", "Parallel"] },
+        "updateStrategy": { "type": "object" },
+        "strategy": { "type": "object" },
+        "annotations": { "type": "object" },
+        "podAnnotations": { "type": "object" },
+        "podLabels": { "type": "object" },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["kind", "replicas"]
+    },
+
+    "keycloak": {
+      "type": "object",
+      "properties": {
+        "hostname": {
+          "type": "string",
+          "pattern": "^https?://",
+          "description": "Scheme is required; Keycloak builds issuer URLs from this."
+        },
+        "hostnameAdmin": { "type": "string", "pattern": "^(|https?://.*)$" },
+        "hostnameStrict": { "type": "boolean" },
+        "hostnameBackchannelDynamic": { "type": "boolean" },
+        "proxyHeaders": { "enum": ["", "forwarded", "xforwarded"] },
+        "proxyTrustedAddresses": { "type": "string" },
+        "optimized": { "type": "boolean" },
+        "http": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "relativePath": { "type": "string", "pattern": "^/" }
+          }
+        },
+        "https": {
+          "type": "object",
+          "properties": {
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        },
+        "management": {
+          "type": "object",
+          "properties": {
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "scheme": {
+              "enum": ["http", "inherited"],
+              "description": "Keycloak accepts only these two; there is no https value."
+            },
+            "healthEnabled": { "type": "boolean" },
+            "relativePath": { "type": "string", "pattern": "^/" }
+          }
+        },
+        "health": {
+          "type": "object",
+          "properties": { "enabled": { "type": "boolean" } }
+        },
+        "features": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "array", "items": { "type": "string" } },
+            "disabled": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "extraArgs": { "type": "array", "items": { "type": "string" } },
+        "extraEnv": { "type": "array" },
+        "extraEnvFrom": { "type": "array" }
+      },
+      "required": ["hostname"]
+    },
+
+    "admin": {
+      "type": "object",
+      "properties": {
+        "existingSecret": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required; this chart never generates an admin password."
+        },
+        "usernameKey": { "type": "string" },
+        "passwordKey": { "type": "string", "minLength": 1 },
+        "username": { "type": "string", "minLength": 1 }
+      },
+      "required": ["existingSecret", "passwordKey"]
+    },
+
+    "cache": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["", "ispn", "local"] },
+        "stack": {
+          "enum": ["", "jdbc-ping", "jdbc-ping-udp", "kubernetes", "tcp", "udp", "ec2", "azure", "google"],
+          "description": "Hyphenated on the wire. Keycloak does not reject a typo here, it just fails to cluster."
+        },
+        "configFile": { "type": "string" },
+        "bindPort": { "type": "integer", "minimum": 1, "maximum": 15535 },
+        "bindToPodIP": { "type": "boolean" },
+        "mtls": {
+          "type": "object",
+          "properties": { "enabled": { "type": "boolean" } }
+        }
+      }
+    },
+
+    "database": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["cnpg", "external"] },
+        "host": { "type": "string" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "name": { "type": "string", "minLength": 1 },
+        "existingSecret": { "type": "string" },
+        "secretKeys": {
+          "type": "object",
+          "properties": {
+            "usernameKey": { "type": "string", "minLength": 1 },
+            "passwordKey": { "type": "string", "minLength": 1 }
+          }
+        },
+        "extraParams": { "type": "string" },
+        "cnpg": {
+          "type": "object",
+          "properties": {
+            "instances": { "type": "integer", "minimum": 1 },
+            "imageName": { "type": "string" },
+            "imageCatalogRef": { "type": "object" },
+            "database": { "type": "string", "minLength": 1 },
+            "owner": { "type": "string", "minLength": 1 },
+            "initdb": { "type": "object" },
+            "postgresql": { "type": "object" },
+            "storage": {
+              "type": "object",
+              "properties": {
+                "size": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$" },
+                "storageClass": { "type": "string" }
+              }
+            },
+            "walStorage": { "type": "object" },
+            "resources": { "type": "object" },
+            "affinity": { "type": "object" },
+            "priorityClassName": { "type": "string" },
+            "backup": { "type": "object" },
+            "retainOnDelete": { "type": "boolean" },
+            "podMonitor": {
+              "type": "object",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "labels": { "type": "object" },
+                "interval": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "required": ["mode"],
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "external" } }, "required": ["mode"] },
+          "then": {
+            "properties": {
+              "host": { "minLength": 1 },
+              "existingSecret": { "minLength": 1 }
+            },
+            "required": ["host", "existingSecret", "port", "name"]
+          }
+        }
+      ]
+    },
+
+    "tls": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["cert-manager", "existingSecret", "none"] },
+        "existingSecret": { "type": "string" },
+        "certManager": {
+          "type": "object",
+          "properties": {
+            "issuerRef": {
+              "type": "object",
+              "properties": {
+                "kind": { "enum": ["Issuer", "ClusterIssuer"] },
+                "name": { "type": "string" },
+                "group": { "type": "string" }
+              }
+            },
+            "duration": { "type": "string", "pattern": "^(|[0-9]+(h|m|s))$" },
+            "renewBefore": { "type": "string", "pattern": "^(|[0-9]+(h|m|s))$" },
+            "privateKey": { "type": "object" },
+            "dnsNames": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      },
+      "required": ["mode"],
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "existingSecret" } }, "required": ["mode"] },
+          "then": {
+            "properties": { "existingSecret": { "minLength": 1 } },
+            "required": ["existingSecret"]
+          }
+        },
+        {
+          "if": { "properties": { "mode": { "const": "cert-manager" } }, "required": ["mode"] },
+          "then": {
+            "properties": {
+              "certManager": {
+                "properties": { "issuerRef": { "properties": { "name": { "minLength": 1 } }, "required": ["name"] } },
+                "required": ["issuerRef"]
+              }
+            },
+            "required": ["certManager"]
+          }
+        }
+      ]
+    },
+
+    "route": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["traefik", "ingress", "gateway", "none"] },
+        "traefik": {
+          "type": "object",
+          "properties": {
+            "entryPoints": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+            "tls": { "type": "object" },
+            "priority": { "type": ["string", "integer"] },
+            "middlewares": { "type": "array" },
+            "annotations": { "type": "object" },
+            "serversTransport": {
+              "type": "object",
+              "properties": {
+                "create": { "type": "boolean" },
+                "insecureSkipVerify": { "type": "boolean" },
+                "rootCAsSecret": { "type": "string" },
+                "name": { "type": "string" }
+              }
+            }
+          }
+        },
+        "ingress": {
+          "type": "object",
+          "properties": {
+            "className": { "type": "string" },
+            "annotations": { "type": "object" },
+            "tls": { "type": "array" },
+            "path": { "type": "string", "pattern": "^/" },
+            "pathType": { "enum": ["Exact", "Prefix", "ImplementationSpecific"] },
+            "extraHosts": { "type": "array" }
+          }
+        },
+        "gateway": {
+          "type": "object",
+          "properties": {
+            "parentRefs": { "type": "array" },
+            "extraHostnames": { "type": "array", "items": { "type": "string" } },
+            "path": {
+              "type": "object",
+              "properties": {
+                "type": { "enum": ["Exact", "PathPrefix", "RegularExpression"] },
+                "value": { "type": "string" }
+              }
+            },
+            "filters": { "type": "array" },
+            "annotations": { "type": "object" }
+          }
+        }
+      },
+      "required": ["mode"],
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "gateway" } }, "required": ["mode"] },
+          "then": {
+            "properties": {
+              "gateway": { "properties": { "parentRefs": { "minItems": 1 } }, "required": ["parentRefs"] }
+            },
+            "required": ["gateway"]
+          }
+        }
+      ]
+    },
+
+    "backup": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["pgdump", "none"] },
+        "schedule": { "type": "string", "minLength": 1 },
+        "timeZone": { "type": "string" },
+        "retain": { "type": "integer", "minimum": 1 },
+        "startingDeadlineSeconds": { "type": "integer", "minimum": 0 },
+        "successfulJobsHistoryLimit": { "type": "integer", "minimum": 0 },
+        "failedJobsHistoryLimit": { "type": "integer", "minimum": 0 },
+        "backoffLimit": { "type": "integer", "minimum": 0 },
+        "waitForDatabaseAttempts": { "type": "integer", "minimum": 1 },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": { "type": "string", "minLength": 1, "not": { "const": "latest" } },
+            "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+          }
+        },
+        "persistence": {
+          "type": "object",
+          "properties": {
+            "existingClaim": { "type": "string" },
+            "size": { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(Ki|Mi|Gi|Ti|K|M|G|T)?$" },
+            "storageClass": { "type": "string" },
+            "accessModes": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+          }
+        },
+        "podSecurityContext": { "type": "object" },
+        "containerSecurityContext": { "type": "object" },
+        "resources": { "type": "object" },
+        "extraEnv": { "type": "array" },
+        "nodeSelector": { "type": "object" },
+        "tolerations": { "type": "array" },
+        "priorityClassName": { "type": "string" }
+      },
+      "required": ["mode"]
+    },
+
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "path": { "type": "string", "pattern": "^/" },
+        "service": { "type": "object", "properties": { "annotations": { "type": "object" } } },
+        "serviceMonitor": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "namespace": { "type": "string" },
+            "labels": { "type": "object" },
+            "interval": { "type": "string", "pattern": "^(|[0-9]+(h|m|s|ms))$" },
+            "scrapeTimeout": { "type": "string", "pattern": "^(|[0-9]+(h|m|s|ms))$" },
+            "tlsConfig": { "type": "object" },
+            "relabelings": { "type": "array" },
+            "metricRelabelings": { "type": "array" }
+          }
+        }
+      }
+    },
+
+    "service": {
+      "type": "object",
+      "properties": {
+        "type": { "enum": ["ClusterIP", "NodePort", "LoadBalancer", "ExternalName"] },
+        "clusterIP": { "type": "string" },
+        "sessionAffinity": { "enum": ["", "None", "ClientIP"] },
+        "ports": {
+          "type": "object",
+          "properties": {
+            "http": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "https": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        },
+        "nodePorts": {
+          "type": "object",
+          "properties": {
+            "http": { "type": ["string", "integer"] },
+            "https": { "type": ["string", "integer"] }
+          }
+        },
+        "annotations": { "type": "object" }
+      }
+    },
+
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": { "type": "boolean" },
+        "name": { "type": "string" },
+        "annotations": { "type": "object" },
+        "automountServiceAccountToken": { "type": "boolean" }
+      }
+    },
+
+    "podDisruptionBudget": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minAvailable": { "type": ["string", "integer"] },
+        "maxUnavailable": { "type": ["string", "integer"] }
+      }
+    },
+
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "ingress": {
+          "type": "object",
+          "properties": {
+            "from": { "type": "array" },
+            "metricsFrom": { "type": "array" }
+          }
+        },
+        "extraIngress": { "type": "array" },
+        "egress": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "rules": { "type": "array" }
+          }
+        }
+      }
+    },
+
+    "resources": { "type": "object" },
+    "podSecurityContext": { "type": "object" },
+    "containerSecurityContext": { "type": "object" },
+
+    "livenessProbe": { "$ref": "#/$defs/probe" },
+    "readinessProbe": { "$ref": "#/$defs/probe" },
+    "startupProbe": { "$ref": "#/$defs/probe" },
+
+    "nodeSelector": { "type": "object" },
+    "tolerations": { "type": "array" },
+    "affinity": { "type": "object" },
+    "topologySpreadConstraints": { "type": "array" },
+    "priorityClassName": { "type": "string" },
+
+    "extraVolumes": { "type": "array" },
+    "extraVolumeMounts": { "type": "array" },
+    "extraInitContainers": { "type": "array" },
+    "extraContainers": { "type": "array" },
+
+    "tests": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": {
+          "type": "object",
+          "properties": {
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": { "type": "string", "minLength": 1, "not": { "const": "latest" } },
+            "pullPolicy": { "enum": ["Always", "IfNotPresent", "Never"] }
+          }
+        }
+      }
+    },
+
+    "extraObjects": { "type": "array" }
+  },
+
+  "required": ["image", "controller", "keycloak", "admin", "database", "tls", "route", "backup"],
+
+  "$defs": {
+    "probe": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "initialDelaySeconds": { "type": "integer", "minimum": 0 },
+        "periodSeconds": { "type": "integer", "minimum": 1 },
+        "timeoutSeconds": { "type": "integer", "minimum": 1 },
+        "successThreshold": { "type": "integer", "minimum": 1 },
+        "failureThreshold": { "type": "integer", "minimum": 1 }
+      }
+    }
+  }
+}

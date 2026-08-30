@@ -1,0 +1,565 @@
+# -- Override the chart name used in resource names and labels.
+nameOverride: ""
+# -- Override the full release-qualified name used for every resource.
+fullnameOverride: ""
+# -- Labels added to every object this chart creates.
+commonLabels: {}
+# -- Annotations added to every object this chart creates.
+commonAnnotations: {}
+
+image:
+  # -- Registry serving the Keycloak image.
+  registry: quay.io
+  # -- Keycloak image repository.
+  repository: keycloak/keycloak
+  # -- Image tag. Defaults to the chart's appVersion when empty.
+  tag: ""
+  # -- Image digest, `sha256:…`. Appended to the tag when set, and it is the
+  # digest that decides which bytes run.
+  digest: ""
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+  # -- Image pull secrets.
+  pullSecrets: []
+  builtWith:
+    # -- Whether the image was built with `--health-enabled=true`. Only read
+    # when `keycloak.optimized` is true. `health-enabled` is a Keycloak
+    # build-time option, so on an optimized image it cannot be turned on at
+    # runtime — declaring it wrong here means probes point at a dark port.
+    healthEnabled: true
+    # -- Whether the image was built with `--metrics-enabled=true`. Only read
+    # when `keycloak.optimized` is true.
+    metricsEnabled: true
+
+controller:
+  # -- `StatefulSet` or `Deployment`. StatefulSet rolls one pod at a time,
+  # which matters because Keycloak migrates the database schema on start;
+  # a Deployment's default surge would run the new and old versions against
+  # the same database at once. Switching this on a live release replaces the
+  # object rather than updating it.
+  kind: StatefulSet
+  # -- Number of Keycloak pods.
+  replicas: 1
+  # -- Revision history kept by the controller.
+  revisionHistoryLimit: 10
+  # -- StatefulSet pod management policy. `OrderedReady` is what makes an
+  # upgrade strictly sequential.
+  podManagementPolicy: OrderedReady
+  # -- StatefulSet `updateStrategy`. Ignored for a Deployment.
+  updateStrategy: {}
+  # -- Deployment `strategy`. Defaults to `Recreate`, for the schema-migration
+  # reason above. Ignored for a StatefulSet.
+  strategy:
+    type: Recreate
+  # -- Annotations on the controller object.
+  annotations: {}
+  # -- Annotations on the pod template.
+  podAnnotations: {}
+  # -- Labels on the pod template.
+  podLabels: {}
+  # -- Seconds a pod gets to shut down cleanly.
+  terminationGracePeriodSeconds: 60
+
+keycloak:
+  # -- Public URL Keycloak serves on, scheme included, e.g.
+  # `https://auth.example.com`. Required: Keycloak builds issuer URLs and
+  # redirect targets from it.
+  hostname: ""
+  # -- Separate URL for the admin console, when it is not the same host.
+  hostnameAdmin: ""
+  # -- Reject requests whose Host header does not match `hostname`.
+  hostnameStrict: true
+  # -- Resolve backchannel URLs from the incoming request instead of
+  # `hostname`. Needed when in-cluster clients talk to the Service directly.
+  hostnameBackchannelDynamic: false
+  # -- Which proxy headers to trust: `forwarded`, `xforwarded`, or empty for
+  # none. Leaving this empty behind a reverse proxy makes Keycloak generate
+  # URLs from its own address rather than the public one.
+  proxyHeaders: ""
+  # -- Trusted proxy addresses, comma separated.
+  proxyTrustedAddresses: ""
+  # -- Run `start` rather than `start --optimized`. Set true only with an
+  # image built by `kc.sh build`; the chart then refuses to emit build-time
+  # options, because on an optimized image they are either ignored or fatal.
+  optimized: false
+
+  http:
+    # -- Serve plain HTTP. Keycloak's own default is false, and a pod behind a
+    # TLS-terminating proxy needs this on or nothing listens on 8080.
+    enabled: true
+    # -- HTTP container port.
+    port: 8080
+    # -- Path Keycloak is served under. Build-time: it must match the image
+    # when `keycloak.optimized` is true.
+    relativePath: /
+
+  https:
+    # -- HTTPS container port. Serving HTTPS is driven by `tls.mode`, not by a
+    # switch here.
+    port: 8443
+
+  management:
+    # -- Management container port, carrying health and metrics.
+    port: 9000
+    # -- `http` or `inherited`. `inherited` follows the main listener, so the
+    # management port turns HTTPS the moment TLS is configured and kubelet
+    # probes then need HTTPS too. `http` keeps probes plain and is why it is
+    # the default here.
+    scheme: http
+    # -- Serve health on the management port. Build-time. Turning it off moves
+    # health onto the main HTTP port.
+    healthEnabled: true
+    # -- Path the management endpoints are served under. Build-time.
+    relativePath: /
+
+  health:
+    # -- Enable the health endpoints at all. Build-time, and Keycloak's own
+    # default is false.
+    enabled: true
+
+  features:
+    # -- Keycloak features to enable. Build-time.
+    enabled: []
+    # -- Keycloak features to disable. Build-time.
+    disabled: []
+
+  # -- Extra arguments appended after `start`.
+  extraArgs: []
+  # -- Extra environment variables for the Keycloak container.
+  extraEnv: []
+  # -- Extra `envFrom` sources for the Keycloak container.
+  extraEnvFrom: []
+
+admin:
+  # -- Secret holding the bootstrap admin credentials. Required. This chart
+  # never generates a password: a generated one changes on every render and
+  # locks you out on the next upgrade.
+  existingSecret: ""
+  # -- Key in that secret holding the username. Empty uses `admin.username`
+  # as a literal instead, which is the common case.
+  usernameKey: ""
+  # -- Key in that secret holding the password.
+  passwordKey: password
+  # -- Bootstrap admin username, used when the secret carries only a password.
+  # Keycloak's own default is `temp-admin`. The bootstrap account applies only
+  # while the master realm does not exist yet.
+  username: temp-admin
+
+cache:
+  # -- `ispn` or `local`, or empty to let Keycloak decide. Keycloak picks
+  # `ispn` when running as a server.
+  mode: ""
+  # -- JGroups discovery stack. Empty means `jdbc-ping`, which discovers peers
+  # through the database and needs no extra configuration — which is why this
+  # chart leaves it empty. `kubernetes` is deprecated upstream and needs a
+  # system property with no CLI equivalent.
+  stack: ""
+  # -- Path to a custom Infinispan XML, relative to `conf/`.
+  configFile: ""
+  # -- JGroups bind port. The failure-detection port is this plus 50000, and
+  # the NetworkPolicy computes it rather than hardcoding 57800.
+  bindPort: 7800
+  # -- Bind the JGroups transport to the pod IP rather than letting JGroups
+  # pick by `SITE_LOCAL`, which misses pod CIDRs outside RFC1918.
+  bindToPodIP: true
+  mtls:
+    # -- Encrypt and authenticate cluster traffic. Keycloak's default is true.
+    enabled: true
+
+database:
+  # -- `cnpg` creates a CloudNativePG `Cluster` and reads the credentials
+  # CloudNativePG generates. `external` points at a database you already have.
+  mode: cnpg
+  # -- Database host. Required when mode is `external`.
+  host: ""
+  # -- Database port. Used when mode is `external`.
+  port: 5432
+  # -- Database name. Used when mode is `external`.
+  name: keycloak
+  # -- Secret holding the database username and password. Required when mode
+  # is `external`.
+  existingSecret: ""
+  secretKeys:
+    # -- Key in the database secret holding the username.
+    usernameKey: username
+    # -- Key in the database secret holding the password.
+    passwordKey: password
+  # -- Extra JDBC parameters appended to the connection URL.
+  extraParams: ""
+  cnpg:
+    # -- PostgreSQL instances in the cluster.
+    instances: 1
+    # -- Explicit PostgreSQL image. Empty uses the operator's default.
+    imageName: ""
+    # -- CloudNativePG `imageCatalogRef`.
+    imageCatalogRef: {}
+    # -- Database created at bootstrap.
+    database: keycloak
+    # -- Role owning that database.
+    owner: keycloak
+    # -- Extra `bootstrap.initdb` fields.
+    initdb: {}
+    # -- `postgresql` block passed through to the Cluster.
+    postgresql: {}
+    storage:
+      # -- Volume size for each instance.
+      size: 8Gi
+      # -- Storage class for the data volume.
+      storageClass: ""
+    # -- Separate WAL storage.
+    walStorage: {}
+    # -- Resources for the PostgreSQL pods.
+    resources: {}
+    # -- Affinity for the PostgreSQL pods.
+    affinity: {}
+    # -- Priority class for the PostgreSQL pods.
+    priorityClassName: ""
+    # -- CloudNativePG `backup` block, for Barman object-store backups.
+    backup: {}
+    # -- Keep the Cluster and its volumes when the release is uninstalled.
+    retainOnDelete: true
+    podMonitor:
+      # -- Create a PodMonitor for the PostgreSQL pods.
+      enabled: false
+      # -- Extra labels for that PodMonitor.
+      labels: {}
+      # -- Scrape interval.
+      interval: ""
+
+tls:
+  # -- `cert-manager` issues a Certificate and Keycloak terminates TLS itself;
+  # `existingSecret` uses a secret you supply; `none` serves plain HTTP and
+  # leaves TLS to whatever is in front.
+  mode: none
+  # -- Secret with `tls.crt` and `tls.key`. Required when mode is
+  # `existingSecret`.
+  existingSecret: ""
+  certManager:
+    issuerRef:
+      # -- `Issuer` or `ClusterIssuer`.
+      kind: ClusterIssuer
+      # -- Issuer name. Required when mode is `cert-manager`.
+      name: ""
+      # -- Issuer API group.
+      group: ""
+    # -- Certificate lifetime.
+    duration: ""
+    # -- How long before expiry to renew.
+    renewBefore: ""
+    # -- `privateKey` block passed to the Certificate.
+    privateKey: {}
+    # -- DNS names on the certificate. Empty means the in-cluster Service
+    # names, which is what secures the proxy-to-Keycloak hop.
+    dnsNames: []
+
+route:
+  # -- `traefik`, `ingress`, `gateway` or `none`.
+  mode: none
+  traefik:
+    # -- Traefik entry points to attach the route to.
+    entryPoints:
+      - websecure
+    # -- `tls` block on the IngressRoute. `{}` uses the default certificate.
+    tls: {}
+    # -- Route priority.
+    priority: ""
+    # -- Middlewares applied to the route.
+    middlewares: []
+    # -- Annotations on the IngressRoute.
+    annotations: {}
+    serversTransport:
+      # -- Create a ServersTransport. Only needed when Keycloak terminates TLS
+      # itself, because Traefik then has to trust its certificate.
+      create: true
+      # -- Skip verification of Keycloak's certificate.
+      insecureSkipVerify: true
+      # -- Secret with the CA bundle, when not skipping verification.
+      rootCAsSecret: ""
+      # -- Use an existing ServersTransport instead of creating one.
+      name: ""
+  ingress:
+    # -- IngressClass name.
+    className: ""
+    # -- Annotations on the Ingress.
+    annotations: {}
+    # -- `tls` block on the Ingress.
+    tls: []
+    # -- Path matched by the rule.
+    path: /
+    # -- Path type.
+    pathType: Prefix
+    # -- Extra hosts, each `{host, path, pathType}`.
+    extraHosts: []
+  gateway:
+    # -- `parentRefs` for the HTTPRoute. Required when mode is `gateway`.
+    parentRefs: []
+    # -- Extra hostnames on the HTTPRoute.
+    extraHostnames: []
+    path:
+      # -- Path match type.
+      type: PathPrefix
+      # -- Path match value.
+      value: /
+    # -- Filters applied to the rule.
+    filters: []
+    # -- Annotations on the HTTPRoute.
+    annotations: {}
+
+backup:
+  # -- `pgdump` runs a periodic `pg_dump` into a volume; `none` creates
+  # nothing. In `cnpg` database mode, `database.cnpg.backup` is the
+  # object-store alternative and the two are independent.
+  mode: none
+  # -- Cron schedule for the dump.
+  schedule: "0 3 * * *"
+  # -- IANA time zone for the schedule.
+  timeZone: ""
+  # -- Dumps to keep.
+  retain: 7
+  # -- Seconds a missed schedule may still start within.
+  startingDeadlineSeconds: 300
+  # -- Successful jobs kept.
+  successfulJobsHistoryLimit: 3
+  # -- Failed jobs kept.
+  failedJobsHistoryLimit: 3
+  # -- Retries before a dump is given up on.
+  backoffLimit: 2
+  # -- Two-second waits for the database before dumping.
+  waitForDatabaseAttempts: 90
+  image:
+    # -- Image carrying `pg_dump`. Its major version must be at least the
+    # server's.
+    repository: ghcr.io/cloudnative-pg/postgresql
+    # -- Image tag.
+    tag: "18.4-system-trixie"
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+  persistence:
+    # -- Use an existing claim instead of creating one.
+    existingClaim: ""
+    # -- Size of the created claim.
+    size: 4Gi
+    # -- Storage class for the created claim.
+    storageClass: ""
+    # -- Access modes for the created claim.
+    accessModes:
+      - ReadWriteOnce
+  # -- Pod security context for the dump.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 26
+    runAsGroup: 26
+    fsGroup: 26
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container security context for the dump.
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  # -- Resources for the dump container.
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+  # -- Extra environment variables for the dump container.
+  extraEnv: []
+  # -- Node selector for the dump.
+  nodeSelector: {}
+  # -- Tolerations for the dump.
+  tolerations: []
+  # -- Priority class for the dump.
+  priorityClassName: ""
+
+metrics:
+  # -- Enable Keycloak's metrics endpoint. Build-time: on an optimized image
+  # this must match how the image was built.
+  enabled: false
+  # -- Path metrics are served on, under the management relative path.
+  path: /metrics
+  service:
+    # -- Annotations on the management Service.
+    annotations: {}
+  serviceMonitor:
+    # -- Create a ServiceMonitor. Needs the Prometheus operator CRDs.
+    enabled: false
+    # -- Namespace for the ServiceMonitor. Defaults to the release namespace.
+    namespace: ""
+    # -- Extra labels, usually what a Prometheus instance selects on.
+    labels: {}
+    # -- Scrape interval.
+    interval: ""
+    # -- Scrape timeout.
+    scrapeTimeout: ""
+    # -- TLS config for the scrape.
+    tlsConfig: {}
+    # -- Relabeling rules.
+    relabelings: []
+    # -- Metric relabeling rules.
+    metricRelabelings: []
+
+service:
+  # -- Service type.
+  type: ClusterIP
+  # -- Explicit clusterIP.
+  clusterIP: ""
+  # -- Session affinity.
+  sessionAffinity: ""
+  ports:
+    # -- HTTP service port.
+    http: 8080
+    # -- HTTPS service port.
+    https: 8443
+  nodePorts:
+    # -- Node port for HTTP, when type is NodePort.
+    http: ""
+    # -- Node port for HTTPS, when type is NodePort.
+    https: ""
+  # -- Annotations on the Service.
+  annotations: {}
+
+serviceAccount:
+  # -- Create a ServiceAccount for Keycloak.
+  create: true
+  # -- Name of the ServiceAccount. Generated when empty.
+  name: ""
+  # -- Annotations on the ServiceAccount.
+  annotations: {}
+  # -- Mount the API token. Keycloak does not call the API, so this is off.
+  automountServiceAccountToken: false
+
+podDisruptionBudget:
+  # -- Create a PodDisruptionBudget.
+  enabled: false
+  # -- Minimum available pods. Rejected with a single replica, where it would
+  # block every node drain.
+  minAvailable: ""
+  # -- Maximum unavailable pods.
+  maxUnavailable: ""
+
+networkPolicy:
+  # -- Create a NetworkPolicy.
+  enabled: false
+  ingress:
+    # -- Peers allowed to reach the HTTP and HTTPS ports. Empty allows all.
+    from: []
+    # -- Peers allowed to reach the management port. Empty allows all.
+    metricsFrom: []
+  # -- Extra ingress rules.
+  extraIngress: []
+  egress:
+    # -- Restrict egress as well. Leaving this off avoids breaking database
+    # and DNS traffic by omission.
+    enabled: false
+    # -- Egress rules, used only when egress is enabled.
+    rules: []
+
+# -- Resources for the Keycloak container. A non-optimized start runs an
+# augmentation step on boot, which is CPU-hungry for a few seconds.
+resources:
+  requests:
+    cpu: 250m
+    memory: 768Mi
+  limits:
+    memory: 2Gi
+
+# -- Pod security context.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 0
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container security context. `readOnlyRootFilesystem` is false because a
+# non-optimized start writes the augmentation output under
+# `/opt/keycloak/lib/quarkus`. With `keycloak.optimized: true` you can set it
+# true.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+livenessProbe:
+  # -- Enable the liveness probe. Requires the health endpoints.
+  enabled: true
+  # -- Seconds before the first probe.
+  initialDelaySeconds: 60
+  # -- Seconds between probes.
+  periodSeconds: 30
+  # -- Probe timeout.
+  timeoutSeconds: 5
+  # -- Consecutive successes needed.
+  successThreshold: 1
+  # -- Consecutive failures tolerated.
+  failureThreshold: 3
+
+readinessProbe:
+  # -- Enable the readiness probe.
+  enabled: true
+  # -- Seconds before the first probe.
+  initialDelaySeconds: 30
+  # -- Seconds between probes.
+  periodSeconds: 10
+  # -- Probe timeout.
+  timeoutSeconds: 5
+  # -- Consecutive successes needed.
+  successThreshold: 1
+  # -- Consecutive failures tolerated.
+  failureThreshold: 3
+
+startupProbe:
+  # -- Enable the startup probe. A non-optimized start builds on boot, so the
+  # window has to cover that.
+  enabled: true
+  # -- Seconds before the first probe.
+  initialDelaySeconds: 15
+  # -- Seconds between probes.
+  periodSeconds: 5
+  # -- Probe timeout.
+  timeoutSeconds: 5
+  # -- Consecutive successes needed.
+  successThreshold: 1
+  # -- Consecutive failures tolerated.
+  failureThreshold: 60
+
+# -- Node selector for Keycloak pods.
+nodeSelector: {}
+# -- Tolerations for Keycloak pods.
+tolerations: []
+# -- Affinity for Keycloak pods.
+affinity: {}
+# -- Topology spread constraints for Keycloak pods.
+topologySpreadConstraints: []
+# -- Priority class for Keycloak pods.
+priorityClassName: ""
+
+# -- Extra volumes on the pod.
+extraVolumes: []
+# -- Extra volume mounts on the Keycloak container.
+extraVolumeMounts: []
+# -- Extra init containers.
+extraInitContainers: []
+# -- Extra sidecar containers.
+extraContainers: []
+
+tests:
+  # -- Render the `helm test` pod.
+  enabled: true
+  image:
+    # -- Image used by the test pod.
+    repository: curlimages/curl
+    # -- Image tag.
+    tag: "8.18.0"
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+
+# -- Arbitrary extra manifests, rendered through `tpl`.
+extraObjects: []
