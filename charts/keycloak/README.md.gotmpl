@@ -1,0 +1,56 @@
+{{ template "chart.header" . }}
+
+{{ template "chart.description" . }}
+
+{{ template "chart.badgesSection" . }}
+
+## Install
+
+```sh
+helm install keycloak oci://ghcr.io/sophotechlabs/charts/keycloak \
+  --set keycloak.hostname=https://auth.example.com \
+  --set admin.existingSecret=keycloak-admin
+```
+
+## What it creates, and what it does not
+
+Four things this chart can create for you are each behind a mode value, and each defaults to off or to the least opinionated option. Nothing is auto-detected: a chart that renders differently depending on which CRDs happen to be installed renders differently under `helm template`, under a Flux dry-run, and in your cluster.
+
+| Value | Options | Default |
+|---|---|---|
+| `database.mode` | `cnpg` creates a CloudNativePG `Cluster`; `external` uses a database you already have | `cnpg` |
+| `tls.mode` | `cert-manager` issues a `Certificate`; `existingSecret` uses yours; `none` leaves TLS to whatever is in front | `none` |
+| `route.mode` | `traefik`, `ingress`, `gateway`, `none` | `none` |
+| `backup.mode` | `pgdump` runs a periodic dump into a volume; `none` | `none` |
+
+With all four at their defaults except a database, the chart installs on a cluster with no CRDs at all. That path is tested in CI on a kind cluster with none of them installed.
+
+The one thing that is not optional is a database — the only choice is who creates it.
+
+## Things worth knowing before you run it
+
+**The admin password is never generated.** `admin.existingSecret` is required. A chart-generated password changes on every render and locks you out on the next upgrade.
+
+**`controller.kind` decides how upgrades roll.** Keycloak migrates its database schema on start, so a `StatefulSet` (the default) rolling one pod at a time is the safe shape. The `Deployment` branch defaults to `strategy: Recreate` for the same reason. Switching between the two on a live release replaces the object rather than updating it.
+
+**Clustering needs no configuration.** Keycloak 26 discovers its peers through the database, so `controller.replicas: 3` works as-is. Do not set `cache.stack: kubernetes` — that path is deprecated upstream and needs a system property with no CLI equivalent.
+
+If you run more than one replica against an *external* database, note that a second Keycloak release pointed at the same database and schema will merge into the same cluster. Give each release its own database or schema.
+
+**`keycloak.optimized` requires a matching image.** Keycloak's `health-enabled`, `metrics-enabled`, `features` and `http-relative-path` are build-time options: on an image built with `kc.sh build` they are baked in, and passing them at runtime is either ignored or fatal. With `optimized: true` the chart refuses to emit them and checks your `image.builtWith` declarations against the values that depend on them, rather than silently producing probes pointing at a port nothing is listening on.
+
+**Probes follow the management port.** Health and metrics live on port 9000, which listens only when health or metrics is enabled. `keycloak.management.scheme` defaults to `http` so kubelet probes stay plain even when Keycloak terminates TLS; set it to `inherited` if you want the management port to follow the main listener, and the probes will follow.
+
+## Realm and user configuration
+
+This chart runs the server. To keep a realm — clients, roles, groups and users — matching a file in git, use [`keycloak-config`](../keycloak-config).
+
+{{ template "chart.valuesSection" . }}
+
+{{ template "chart.maintainersSection" . }}
+
+## License
+
+Apache-2.0. Copyright 2026 Sophotech s.r.o.
+
+Keycloak™ is a trademark of the Linux Foundation. This chart is not affiliated with, endorsed by, or supported by the Keycloak project.

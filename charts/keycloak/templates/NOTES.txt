@@ -1,0 +1,35 @@
+{{ include "keycloak.fullname" . }} is installing.
+
+Serving on: {{ .Values.keycloak.hostname }}
+In-cluster: {{ include "keycloak.serviceScheme" . }}://{{ include "keycloak.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ include "keycloak.servicePort" . }}
+
+Database:   {{ if eq .Values.database.mode "cnpg" }}CloudNativePG cluster {{ include "keycloak.databaseClusterName" . }} created by this release{{ else }}external, at {{ include "keycloak.databaseHost" . }}:{{ include "keycloak.databasePort" . }}{{ end }}
+TLS:        {{ if eq .Values.tls.mode "none" }}terminated ahead of Keycloak{{ else if eq .Values.tls.mode "cert-manager" }}cert-manager Certificate {{ include "keycloak.tlsSecretName" . }}{{ else }}existing secret {{ include "keycloak.tlsSecretName" . }}{{ end }}
+Route:      {{ if eq .Values.route.mode "none" }}none created by this release{{ else }}{{ .Values.route.mode }}{{ end }}
+Backup:     {{ if eq .Values.backup.mode "none" }}none{{ else }}pg_dump on "{{ .Values.backup.schedule }}", keeping {{ .Values.backup.retain }}{{ end }}
+
+Watch it come up:
+
+  kubectl -n {{ .Release.Namespace }} rollout status {{ .Values.controller.kind | lower }}/{{ include "keycloak.fullname" . }}
+
+{{ if not .Values.keycloak.optimized }}
+This runs a non-optimized `start`, so Keycloak re-runs its build step on every
+container start. That is why the startup probe allows
+{{ mul .Values.startupProbe.periodSeconds .Values.startupProbe.failureThreshold }}s. For faster starts, build an image with
+`kc.sh build` and set keycloak.optimized=true along with the matching
+image.builtWith values.
+{{ end }}
+{{- if eq (include "keycloak.managementEnabled" .) "false" }}
+Health and metrics are both off, so nothing is listening on the management
+port and no probes are configured.
+{{- end }}
+{{- if and (gt (int .Values.controller.replicas) 1) (eq .Values.database.mode "external") }}
+
+You are running {{ .Values.controller.replicas }} replicas against an external database. Keycloak
+discovers its peers through a JGROUPS_PING table in that database, so a second
+Keycloak release pointed at the same database and schema will merge into this
+cluster. Give each release its own database or schema.
+{{- end }}
+
+The admin account comes from secret {{ .Values.admin.existingSecret }}. It is a bootstrap
+account and only applies while the master realm does not yet exist.
