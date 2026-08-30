@@ -1,0 +1,35 @@
+{{- if or (eq .Values.controller.kind "StatefulSet") (gt (int .Values.controller.replicas) 1) }}
+{{/*
+Required by a StatefulSet whatever the cache stack, and used for peer discovery
+when clustering. publishNotReadyAddresses is what lets pods find each other
+before any of them is ready, which is exactly when they need to.
+*/}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "keycloak.headlessServiceName" . }}
+  labels:
+    {{- include "keycloak.labels" . | nindent 4 }}
+    app.kubernetes.io/component: headless
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: http
+      port: {{ .Values.service.ports.http }}
+      targetPort: http
+      protocol: TCP
+    {{- if eq (include "keycloak.httpsEnabled" .) "true" }}
+    - name: https
+      port: {{ .Values.service.ports.https }}
+      targetPort: https
+      protocol: TCP
+    {{- end }}
+  selector:
+    {{- include "keycloak.selectorLabels" . | nindent 4 }}
+{{- end }}
