@@ -1,0 +1,28 @@
+keycloak:
+  hostname: https://auth.example.com
+admin:
+  existingSecret: keycloak-admin
+controller:
+  kind: StatefulSet
+  replicas: 3
+database:
+  mode: cnpg
+  cnpg:
+    instances: 3
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+networkPolicy:
+  enabled: true
+  ingress:
+    from:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: traefik
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: DoNotSchedule
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/name: keycloak

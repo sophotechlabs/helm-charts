@@ -1,0 +1,176 @@
+suite: controller kind switch
+templates:
+  - templates/statefulset.yaml
+  - templates/deployment.yaml
+  - templates/service-headless.yaml
+set:
+  keycloak.hostname: https://auth.example.com
+  admin.existingSecret: keycloak-admin
+tests:
+  - it: renders a StatefulSet and no Deployment by default
+    asserts:
+      - template: templates/statefulset.yaml
+        hasDocuments:
+          count: 1
+      - template: templates/deployment.yaml
+        hasDocuments:
+          count: 0
+      - template: templates/statefulset.yaml
+        isKind:
+          of: StatefulSet
+
+  - it: points the StatefulSet at the headless service
+    set:
+      controller.replicas: 3
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.serviceName
+          value: RELEASE-NAME-keycloak-headless
+      - template: templates/service-headless.yaml
+        hasDocuments:
+          count: 1
+      - template: templates/service-headless.yaml
+        equal:
+          path: spec.clusterIP
+          value: None
+      - template: templates/service-headless.yaml
+        equal:
+          path: spec.publishNotReadyAddresses
+          value: true
+
+  - it: renders a Deployment and no StatefulSet when asked
+    set:
+      controller.kind: Deployment
+    asserts:
+      - template: templates/deployment.yaml
+        hasDocuments:
+          count: 1
+      - template: templates/statefulset.yaml
+        hasDocuments:
+          count: 0
+      - template: templates/deployment.yaml
+        isKind:
+          of: Deployment
+
+  # A surging rollout would run the new and old Keycloak against the same
+  # database while the schema migrates.
+  - it: defaults a Deployment to Recreate
+    set:
+      controller.kind: Deployment
+    asserts:
+      - template: templates/deployment.yaml
+        equal:
+          path: spec.strategy.type
+          value: Recreate
+
+  - it: keeps the headless service for a single-replica Deployment away
+    set:
+      controller.kind: Deployment
+      controller.replicas: 1
+    asserts:
+      - template: templates/service-headless.yaml
+        hasDocuments:
+          count: 0
+
+  - it: brings the headless service back for a clustered Deployment
+    set:
+      controller.kind: Deployment
+      controller.replicas: 2
+    asserts:
+      - template: templates/service-headless.yaml
+        hasDocuments:
+          count: 1
+
+  - it: carries replicas through to either kind
+    set:
+      controller.replicas: 4
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.replicas
+          value: 4
+---
+suite: clustering wiring
+templates:
+  - templates/statefulset.yaml
+  - templates/networkpolicy.yaml
+set:
+  keycloak.hostname: https://auth.example.com
+  admin.existingSecret: keycloak-admin
+  controller.replicas: 3
+tests:
+  # Kubernetes only expands $(VAR) from entries defined earlier in the same
+  # container, so POD_IP has to come first or the value is passed through as
+  # the literal string.
+  - it: defines POD_IP before the value that references it
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.containers[0].env[0].name
+          value: POD_IP
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.containers[0].env[1].name
+          value: KC_CACHE_EMBEDDED_NETWORK_BIND_ADDRESS
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.containers[0].env[1].value
+          value: $(POD_IP)
+
+  - it: omits the pod-IP binding for a single replica
+    set:
+      controller.replicas: 1
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.containers[0].env[0].name
+          value: KC_BOOTSTRAP_ADMIN_USERNAME
+
+  - it: exposes both JGroups ports
+    asserts:
+      - template: templates/statefulset.yaml
+        contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: jgroups
+            containerPort: 7800
+            protocol: TCP
+      - template: templates/statefulset.yaml
+        contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: jgroups-fd
+            containerPort: 57800
+            protocol: TCP
+
+  # The failure-detection port is the bind port plus 50000, not a constant.
+  - it: derives the failure-detection port from the bind port
+    set:
+      cache.bindPort: 7900
+    asserts:
+      - template: templates/statefulset.yaml
+        contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: jgroups-fd
+            containerPort: 57900
+            protocol: TCP
+
+  - it: opens both JGroups ports to its own pods in the network policy
+    set:
+      networkPolicy.enabled: true
+      cache.bindPort: 7900
+    asserts:
+      - template: templates/networkpolicy.yaml
+        contains:
+          path: spec.ingress[2].ports
+          content:
+            port: 7900
+            protocol: TCP
+      - template: templates/networkpolicy.yaml
+        contains:
+          path: spec.ingress[2].ports
+          content:
+            port: 57900
+            protocol: TCP

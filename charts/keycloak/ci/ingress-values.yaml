@@ -1,0 +1,22 @@
+keycloak:
+  hostname: https://auth.example.com
+  proxyHeaders: xforwarded
+admin:
+  existingSecret: keycloak-admin
+database:
+  mode: external
+  host: postgres.db.svc.cluster.local
+  existingSecret: keycloak-db
+tls:
+  mode: existingSecret
+  existingSecret: keycloak-server-tls
+route:
+  mode: ingress
+  ingress:
+    className: nginx
+    annotations:
+      nginx.ingress.kubernetes.io/backend-protocol: HTTPS
+    tls:
+      - hosts:
+          - auth.example.com
+        secretName: auth-example-com-tls

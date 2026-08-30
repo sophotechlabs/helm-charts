@@ -1,0 +1,139 @@
+suite: naming and labels
+templates:
+  - templates/statefulset.yaml
+  - templates/service.yaml
+  - templates/serviceaccount.yaml
+set:
+  keycloak.hostname: https://auth.example.com
+  admin.existingSecret: keycloak-admin
+tests:
+  - it: names resources after the release and the chart
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: metadata.name
+          value: RELEASE-NAME-keycloak
+      - template: templates/service.yaml
+        equal:
+          path: metadata.name
+          value: RELEASE-NAME-keycloak
+
+  - it: honours fullnameOverride
+    set:
+      fullnameOverride: auth
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: metadata.name
+          value: auth
+      - template: templates/service.yaml
+        equal:
+          path: metadata.name
+          value: auth
+
+  - it: honours nameOverride
+    set:
+      nameOverride: idp
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: metadata.name
+          value: RELEASE-NAME-idp
+      - template: templates/statefulset.yaml
+        equal:
+          path: metadata.labels["app.kubernetes.io/name"]
+          value: idp
+
+  - it: carries the standard labels
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: metadata.labels["app.kubernetes.io/managed-by"]
+          value: Helm
+      - template: templates/statefulset.yaml
+        equal:
+          path: metadata.labels["app.kubernetes.io/instance"]
+          value: RELEASE-NAME
+      - template: templates/statefulset.yaml
+        equal:
+          path: metadata.labels["app.kubernetes.io/part-of"]
+          value: keycloak
+
+  # The selector is immutable on a StatefulSet, so it must never pick up a
+  # label that a later values change could alter.
+  - it: keeps the selector to name and instance only
+    set:
+      commonLabels:
+        team: platform
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: keycloak
+            app.kubernetes.io/instance: RELEASE-NAME
+
+  - it: adds common labels everywhere else
+    set:
+      commonLabels:
+        team: platform
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: metadata.labels.team
+          value: platform
+      - template: templates/service.yaml
+        equal:
+          path: metadata.labels.team
+          value: platform
+
+  - it: creates its own service account by default
+    asserts:
+      - template: templates/serviceaccount.yaml
+        hasDocuments:
+          count: 1
+      - template: templates/serviceaccount.yaml
+        equal:
+          path: metadata.name
+          value: RELEASE-NAME-keycloak
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.serviceAccountName
+          value: RELEASE-NAME-keycloak
+
+  - it: falls back to default when told not to create one
+    set:
+      serviceAccount.create: false
+    asserts:
+      - template: templates/serviceaccount.yaml
+        hasDocuments:
+          count: 0
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.serviceAccountName
+          value: default
+
+  # Keycloak never calls the Kubernetes API.
+  - it: does not mount the API token
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+
+  - it: pins the image by digest when one is given
+    set:
+      image.tag: "26.7.2"
+      image.digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.containers[0].image
+          value: quay.io/keycloak/keycloak:26.7.2@sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+  - it: falls back to the chart appVersion for the tag
+    asserts:
+      - template: templates/statefulset.yaml
+        matchRegex:
+          path: spec.template.spec.containers[0].image
+          pattern: ^quay\.io/keycloak/keycloak:26\.

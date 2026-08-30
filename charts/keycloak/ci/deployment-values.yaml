@@ -1,0 +1,17 @@
+keycloak:
+  hostname: https://auth.example.com
+admin:
+  existingSecret: keycloak-admin
+controller:
+  kind: Deployment
+  replicas: 1
+  strategy:
+    type: Recreate
+database:
+  mode: external
+  host: postgres.db.svc.cluster.local
+  existingSecret: keycloak-db
+tls:
+  mode: none
+route:
+  mode: none

@@ -1,0 +1,16 @@
+keycloak:
+  hostname: https://auth.example.com
+admin:
+  existingSecret: keycloak-admin
+# Nothing optional switched on: this is the scenario that proves the charts
+# install on a cluster with no CRDs at all.
+database:
+  mode: external
+  host: postgres.db.svc.cluster.local
+  existingSecret: keycloak-db
+tls:
+  mode: none
+route:
+  mode: none
+backup:
+  mode: none

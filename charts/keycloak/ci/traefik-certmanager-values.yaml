@@ -1,0 +1,22 @@
+keycloak:
+  hostname: https://auth.example.com
+  proxyHeaders: xforwarded
+admin:
+  existingSecret: keycloak-admin
+database:
+  mode: cnpg
+tls:
+  mode: cert-manager
+  certManager:
+    issuerRef:
+      kind: ClusterIssuer
+      name: platform-ca
+route:
+  mode: traefik
+  traefik:
+    entryPoints:
+      - websecure
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true

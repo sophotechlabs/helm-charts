@@ -1,0 +1,27 @@
+image:
+  repository: registry.example.com/keycloak
+  tag: "26.7.2-optimized"
+  builtWith:
+    healthEnabled: true
+    metricsEnabled: true
+keycloak:
+  hostname: https://auth.example.com
+  optimized: true
+admin:
+  existingSecret: keycloak-admin
+metrics:
+  enabled: true
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+database:
+  mode: external
+  host: postgres.db.svc.cluster.local
+  existingSecret: keycloak-db
+tls:
+  mode: none
+route:
+  mode: none

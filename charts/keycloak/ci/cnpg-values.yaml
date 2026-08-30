@@ -1,0 +1,12 @@
+keycloak:
+  hostname: https://auth.example.com
+admin:
+  existingSecret: keycloak-admin
+database:
+  mode: cnpg
+  cnpg:
+    instances: 1
+    storage:
+      size: 8Gi
+    podMonitor:
+      enabled: true

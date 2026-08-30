@@ -1,0 +1,131 @@
+suite: kc.sh arguments
+templates:
+  - templates/statefulset.yaml
+set:
+  keycloak.hostname: https://auth.example.com
+  admin.existingSecret: keycloak-admin
+tests:
+  - it: always passes a subcommand, because the image has no CMD
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].args[0]
+          value: start
+
+  - it: emits build-time options on a non-optimized start
+    set:
+      keycloak.optimized: false
+      keycloak.health.enabled: true
+      metrics.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --db=postgres
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --health-enabled=true
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --metrics-enabled=true
+
+  - it: omits every build-time option on an optimized start
+    set:
+      keycloak.optimized: true
+      keycloak.health.enabled: true
+      metrics.enabled: true
+      image.builtWith.healthEnabled: true
+      image.builtWith.metricsEnabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --optimized
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --db=postgres
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --health-enabled=true
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --metrics-enabled=true
+
+  - it: does not emit an empty features list
+    set:
+      keycloak.features.enabled: []
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --features=
+
+  - it: joins an explicit features list
+    set:
+      keycloak.features.enabled:
+        - organization
+        - token-exchange
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --features=organization,token-exchange
+
+  - it: builds the JDBC url from the cnpg service
+    set:
+      database.mode: cnpg
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --db-url=jdbc:postgresql://RELEASE-NAME-keycloak-pg-rw:5432/keycloak
+
+  - it: builds the JDBC url from an external host, extra params included
+    set:
+      database.mode: external
+      database.host: pg.example.com
+      database.port: 6432
+      database.name: kc
+      database.existingSecret: kc-db
+      database.extraParams: sslmode=require
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --db-url=jdbc:postgresql://pg.example.com:6432/kc?sslmode=require
+
+  - it: passes the certificate paths only when Keycloak terminates TLS
+    set:
+      tls.mode: existingSecret
+      tls.existingSecret: kc-tls
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --https-certificate-file=/opt/keycloak/certs/tls.crt
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --https-certificate-key-file=/opt/keycloak/certs/tls.key
+
+  - it: passes no certificate paths when TLS is terminated ahead of it
+    set:
+      tls.mode: none
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --https-certificate-file=/opt/keycloak/certs/tls.crt
+
+  - it: leaves the cache stack unset so jdbc-ping stays the default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].args
+          content: --cache-stack=jdbc-ping
+
+  - it: passes a cache stack when one is asked for
+    set:
+      cache.stack: kubernetes
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --cache-stack=kubernetes
+
+  - it: appends extraArgs last
+    set:
+      keycloak.extraArgs:
+        - --log-level=DEBUG
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].args
+          content: --log-level=DEBUG

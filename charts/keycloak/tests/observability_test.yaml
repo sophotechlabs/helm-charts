@@ -1,0 +1,196 @@
+suite: management port and probes
+templates:
+  - templates/statefulset.yaml
+  - templates/service-metrics.yaml
+  - templates/servicemonitor.yaml
+set:
+  keycloak.hostname: https://auth.example.com
+  admin.existingSecret: keycloak-admin
+tests:
+  - it: exposes the management port and probes it when health is on
+    asserts:
+      - template: templates/statefulset.yaml
+        contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: management
+            containerPort: 9000
+            protocol: TCP
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: management
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /health/ready
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /health/live
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.containers[0].startupProbe.httpGet.path
+          value: /health/started
+      - template: templates/service-metrics.yaml
+        hasDocuments:
+          count: 1
+
+  # The management interface listens only when health or metrics is on, so
+  # with both off there is nothing to expose or probe.
+  - it: exposes nothing when health and metrics are both off
+    set:
+      keycloak.health.enabled: false
+      metrics.enabled: false
+      livenessProbe.enabled: false
+      readinessProbe.enabled: false
+      startupProbe.enabled: false
+    asserts:
+      - template: templates/service-metrics.yaml
+        hasDocuments:
+          count: 0
+      - template: templates/statefulset.yaml
+        notContains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: management
+            containerPort: 9000
+            protocol: TCP
+
+  # Turning management health off moves the endpoints to the main port.
+  - it: probes the main port when management health is off
+    set:
+      keycloak.management.healthEnabled: false
+      metrics.enabled: true
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.port
+          value: http
+
+  - it: keeps probes on plain HTTP even when Keycloak terminates TLS
+    set:
+      tls.mode: existingSecret
+      tls.existingSecret: my-tls
+      keycloak.management.scheme: http
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.scheme
+          value: HTTP
+
+  # With scheme inherited, the management port follows the main listener, so
+  # probes have to follow it too.
+  - it: probes over HTTPS when the management scheme is inherited and TLS is on
+    set:
+      tls.mode: existingSecret
+      tls.existingSecret: my-tls
+      keycloak.management.scheme: inherited
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.scheme
+          value: HTTPS
+
+  - it: prefixes the health path with the management relative path
+    set:
+      keycloak.management.relativePath: /mgmt
+    asserts:
+      - template: templates/statefulset.yaml
+        equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /mgmt/health/ready
+
+  - it: creates no ServiceMonitor by default
+    asserts:
+      - template: templates/servicemonitor.yaml
+        hasDocuments:
+          count: 0
+
+  - it: scrapes the management port when a ServiceMonitor is asked for
+    set:
+      metrics.enabled: true
+      metrics.serviceMonitor.enabled: true
+      metrics.serviceMonitor.interval: 30s
+    asserts:
+      - template: templates/servicemonitor.yaml
+        equal:
+          path: spec.endpoints[0].port
+          value: management
+      - template: templates/servicemonitor.yaml
+        equal:
+          path: spec.endpoints[0].path
+          value: /metrics
+      - template: templates/servicemonitor.yaml
+        equal:
+          path: spec.endpoints[0].scheme
+          value: http
+      - template: templates/servicemonitor.yaml
+        equal:
+          path: spec.endpoints[0].interval
+          value: 30s
+---
+suite: backup
+templates:
+  - templates/backup.yaml
+set:
+  keycloak.hostname: https://auth.example.com
+  admin.existingSecret: keycloak-admin
+tests:
+  - it: creates nothing in none mode
+    set:
+      backup.mode: none
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: creates a claim and a cron job in pgdump mode
+    set:
+      backup.mode: pgdump
+    asserts:
+      - hasDocuments:
+          count: 2
+      - isKind:
+          of: PersistentVolumeClaim
+        documentIndex: 0
+      - isKind:
+          of: CronJob
+        documentIndex: 1
+      - equal:
+          path: metadata.annotations["helm.sh/resource-policy"]
+          value: keep
+        documentIndex: 0
+
+  - it: uses an existing claim when given one, creating none
+    set:
+      backup.mode: pgdump
+      backup.persistence.existingClaim: my-backups
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: CronJob
+      - equal:
+          path: spec.jobTemplate.spec.template.spec.volumes[1].persistentVolumeClaim.claimName
+          value: my-backups
+
+  - it: never lets two dumps overlap
+    set:
+      backup.mode: pgdump
+    asserts:
+      - equal:
+          path: spec.concurrencyPolicy
+          value: Forbid
+        documentIndex: 1
+
+  - it: reads the database credentials from the cnpg secret
+    set:
+      backup.mode: pgdump
+      database.mode: cnpg
+    asserts:
+      - contains:
+          path: spec.jobTemplate.spec.template.spec.containers[0].env
+          content:
+            name: PGHOST
+            value: RELEASE-NAME-keycloak-pg-rw
+        documentIndex: 1

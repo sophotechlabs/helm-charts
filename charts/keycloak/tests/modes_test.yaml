@@ -1,0 +1,257 @@
+suite: database modes
+templates:
+  - templates/database-cnpg.yaml
+  - templates/statefulset.yaml
+set:
+  keycloak.hostname: https://auth.example.com
+  admin.existingSecret: keycloak-admin
+tests:
+  - it: creates a CloudNativePG cluster in cnpg mode
+    set:
+      database.mode: cnpg
+    asserts:
+      - template: templates/database-cnpg.yaml
+        isKind:
+          of: Cluster
+        documentIndex: 0
+      - template: templates/database-cnpg.yaml
+        equal:
+          path: metadata.name
+          value: RELEASE-NAME-keycloak-pg
+        documentIndex: 0
+
+  # A database outliving its release is the safer default.
+  - it: keeps the cluster when the release is uninstalled
+    set:
+      database.mode: cnpg
+    asserts:
+      - template: templates/database-cnpg.yaml
+        equal:
+          path: metadata.annotations["helm.sh/resource-policy"]
+          value: keep
+        documentIndex: 0
+
+  - it: lets the retention be turned off
+    set:
+      database.mode: cnpg
+      database.cnpg.retainOnDelete: false
+    asserts:
+      - template: templates/database-cnpg.yaml
+        isNull:
+          path: metadata.annotations
+        documentIndex: 0
+
+  - it: creates nothing in external mode
+    set:
+      database.mode: external
+      database.host: pg.example.com
+      database.existingSecret: kc-db
+    asserts:
+      - template: templates/database-cnpg.yaml
+        hasDocuments:
+          count: 0
+
+  - it: reads the credentials CloudNativePG generates
+    set:
+      database.mode: cnpg
+    asserts:
+      - template: templates/statefulset.yaml
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_DB_USERNAME
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-keycloak-pg-app
+                key: username
+
+  - it: reads the credentials the operator supplies in external mode
+    set:
+      database.mode: external
+      database.host: pg.example.com
+      database.existingSecret: kc-db
+    asserts:
+      - template: templates/statefulset.yaml
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_DB_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: kc-db
+                key: password
+---
+suite: tls modes
+templates:
+  - templates/certificate.yaml
+  - templates/statefulset.yaml
+  - templates/service.yaml
+set:
+  keycloak.hostname: https://auth.example.com
+  admin.existingSecret: keycloak-admin
+tests:
+  - it: creates no certificate and no https port in none mode
+    set:
+      tls.mode: none
+    asserts:
+      - template: templates/certificate.yaml
+        hasDocuments:
+          count: 0
+      - template: templates/service.yaml
+        lengthEqual:
+          path: spec.ports
+          count: 1
+
+  - it: issues a certificate in cert-manager mode
+    set:
+      tls.mode: cert-manager
+      tls.certManager.issuerRef.name: platform-ca
+    asserts:
+      - template: templates/certificate.yaml
+        isKind:
+          of: Certificate
+      - template: templates/certificate.yaml
+        equal:
+          path: spec.secretName
+          value: RELEASE-NAME-keycloak-tls
+      - template: templates/certificate.yaml
+        equal:
+          path: spec.issuerRef.name
+          value: platform-ca
+
+  # This certificate secures the proxy-to-Keycloak hop; the public name lives
+  # on whatever terminates TLS in front.
+  - it: defaults the certificate to in-cluster names
+    set:
+      tls.mode: cert-manager
+      tls.certManager.issuerRef.name: platform-ca
+    asserts:
+      - template: templates/certificate.yaml
+        contains:
+          path: spec.dnsNames
+          content: RELEASE-NAME-keycloak.NAMESPACE.svc.cluster.local
+
+  - it: mounts an existing secret without creating a certificate
+    set:
+      tls.mode: existingSecret
+      tls.existingSecret: my-tls
+    asserts:
+      - template: templates/certificate.yaml
+        hasDocuments:
+          count: 0
+      - template: templates/statefulset.yaml
+        contains:
+          path: spec.template.spec.volumes
+          content:
+            name: keycloak-tls
+            secret:
+              secretName: my-tls
+---
+suite: route modes
+templates:
+  - templates/route-traefik.yaml
+  - templates/route-ingress.yaml
+  - templates/route-gateway.yaml
+set:
+  keycloak.hostname: https://auth.example.com
+  admin.existingSecret: keycloak-admin
+tests:
+  - it: creates nothing in none mode
+    set:
+      route.mode: none
+    asserts:
+      - template: templates/route-traefik.yaml
+        hasDocuments:
+          count: 0
+      - template: templates/route-ingress.yaml
+        hasDocuments:
+          count: 0
+      - template: templates/route-gateway.yaml
+        hasDocuments:
+          count: 0
+
+  - it: creates an IngressRoute and a ServersTransport when Keycloak holds the cert
+    set:
+      route.mode: traefik
+      tls.mode: existingSecret
+      tls.existingSecret: my-tls
+    asserts:
+      - template: templates/route-traefik.yaml
+        hasDocuments:
+          count: 2
+      - template: templates/route-traefik.yaml
+        isKind:
+          of: IngressRoute
+        documentIndex: 0
+      - template: templates/route-traefik.yaml
+        isKind:
+          of: ServersTransport
+        documentIndex: 1
+
+  - it: skips the ServersTransport when TLS is terminated ahead of Keycloak
+    set:
+      route.mode: traefik
+      tls.mode: none
+    asserts:
+      - template: templates/route-traefik.yaml
+        hasDocuments:
+          count: 1
+
+  - it: strips the scheme from the hostname for the route match
+    set:
+      route.mode: traefik
+      tls.mode: none
+    asserts:
+      - template: templates/route-traefik.yaml
+        equal:
+          path: spec.routes[0].match
+          value: Host(`auth.example.com`)
+
+  - it: creates a plain Ingress in ingress mode
+    set:
+      route.mode: ingress
+      route.ingress.className: nginx
+      tls.mode: none
+    asserts:
+      - template: templates/route-ingress.yaml
+        isKind:
+          of: Ingress
+      - template: templates/route-ingress.yaml
+        equal:
+          path: spec.ingressClassName
+          value: nginx
+      - template: templates/route-ingress.yaml
+        equal:
+          path: spec.rules[0].host
+          value: auth.example.com
+      - template: templates/route-ingress.yaml
+        equal:
+          path: spec.rules[0].http.paths[0].backend.service.port.number
+          value: 8080
+
+  - it: points the ingress at the https port when Keycloak terminates TLS
+    set:
+      route.mode: ingress
+      tls.mode: existingSecret
+      tls.existingSecret: my-tls
+    asserts:
+      - template: templates/route-ingress.yaml
+        equal:
+          path: spec.rules[0].http.paths[0].backend.service.port.number
+          value: 8443
+
+  - it: creates an HTTPRoute in gateway mode
+    set:
+      route.mode: gateway
+      route.gateway.parentRefs:
+        - name: platform
+          namespace: gateway
+      tls.mode: none
+    asserts:
+      - template: templates/route-gateway.yaml
+        isKind:
+          of: HTTPRoute
+      - template: templates/route-gateway.yaml
+        contains:
+          path: spec.hostnames
+          content: auth.example.com

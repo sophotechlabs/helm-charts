@@ -1,0 +1,44 @@
+controller:
+  kind: StatefulSet
+  replicas: 2
+keycloak:
+  hostname: https://auth.example.com
+  hostnameAdmin: https://admin.example.com
+  proxyHeaders: xforwarded
+  features:
+    enabled:
+      - organization
+admin:
+  existingSecret: keycloak-admin
+database:
+  mode: cnpg
+  cnpg:
+    instances: 2
+    podMonitor:
+      enabled: true
+tls:
+  mode: cert-manager
+  certManager:
+    issuerRef:
+      kind: ClusterIssuer
+      name: platform-ca
+route:
+  mode: traefik
+backup:
+  mode: pgdump
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+podDisruptionBudget:
+  enabled: true
+  maxUnavailable: 1
+networkPolicy:
+  enabled: true
+extraObjects:
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: '{{ include "keycloak.fullname" . }}-extra'
+    data:
+      note: rendered through tpl

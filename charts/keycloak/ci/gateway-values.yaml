@@ -1,0 +1,17 @@
+keycloak:
+  hostname: https://auth.example.com
+admin:
+  existingSecret: keycloak-admin
+database:
+  mode: external
+  host: postgres.db.svc.cluster.local
+  existingSecret: keycloak-db
+tls:
+  mode: none
+route:
+  mode: gateway
+  gateway:
+    parentRefs:
+      - name: platform
+        namespace: gateway
+        sectionName: https

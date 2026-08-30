@@ -1,0 +1,124 @@
+suite: render-time guards
+templates:
+  - templates/statefulset.yaml
+set:
+  keycloak.hostname: https://auth.example.com
+  admin.existingSecret: keycloak-admin
+tests:
+  # The schema rejects this before the template guard gets a look in, which is
+  # the right order; the guard stays as a backstop for anyone rendering with
+  # schema validation switched off.
+  - it: rejects a hostname with no scheme
+    set:
+      keycloak.hostname: auth.example.com
+    asserts:
+      - failedTemplate:
+          errorPattern: hostname
+
+  - it: rejects build-time features on an optimized image
+    set:
+      keycloak.optimized: true
+      keycloak.features.enabled:
+        - organization
+    asserts:
+      - failedTemplate:
+          errorPattern: build-time option and cannot be set when keycloak.optimized is true
+
+  - it: rejects a relative path change on an optimized image
+    set:
+      keycloak.optimized: true
+      keycloak.http.relativePath: /auth
+    asserts:
+      - failedTemplate:
+          errorPattern: build-time option and cannot be set when keycloak.optimized is true
+
+  - it: rejects health that disagrees with how the image was built
+    set:
+      keycloak.optimized: true
+      keycloak.health.enabled: true
+      image.builtWith.healthEnabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: does not match image.builtWith.healthEnabled
+
+  - it: rejects metrics that disagree with how the image was built
+    set:
+      keycloak.optimized: true
+      metrics.enabled: true
+      image.builtWith.metricsEnabled: false
+    asserts:
+      - failedTemplate:
+          errorPattern: does not match image.builtWith.metricsEnabled
+
+  - it: rejects probes when the health endpoints are off
+    set:
+      keycloak.health.enabled: false
+      livenessProbe.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: probes are enabled but the health endpoints are not
+
+  - it: rejects a local cache with more than one replica
+    set:
+      controller.replicas: 3
+      cache.mode: local
+    asserts:
+      - failedTemplate:
+          errorPattern: each pod would keep its own sessions
+
+  - it: rejects a pod with nothing listening
+    set:
+      keycloak.http.enabled: false
+      tls.mode: none
+    asserts:
+      - failedTemplate:
+          errorPattern: nothing would listen on any port
+
+  - it: rejects a ServiceMonitor without metrics
+    set:
+      metrics.enabled: false
+      metrics.serviceMonitor.enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: requires metrics.enabled
+
+  - it: renders when nothing is wrong
+    asserts:
+      - notFailedTemplate: {}
+---
+suite: disruption budget guards
+templates:
+  - templates/pdb.yaml
+set:
+  keycloak.hostname: https://auth.example.com
+  admin.existingSecret: keycloak-admin
+tests:
+  - it: rejects minAvailable and maxUnavailable together
+    set:
+      podDisruptionBudget.enabled: true
+      podDisruptionBudget.minAvailable: 1
+      podDisruptionBudget.maxUnavailable: 1
+    asserts:
+      - failedTemplate:
+          errorPattern: set minAvailable or maxUnavailable, not both
+
+  - it: rejects minAvailable on a single replica
+    set:
+      controller.replicas: 1
+      podDisruptionBudget.enabled: true
+      podDisruptionBudget.minAvailable: 1
+    asserts:
+      - failedTemplate:
+          errorPattern: blocks every voluntary eviction
+
+  - it: allows maxUnavailable on a single replica
+    set:
+      controller.replicas: 1
+      podDisruptionBudget.enabled: true
+      podDisruptionBudget.maxUnavailable: 1
+    asserts:
+      - hasDocuments:
+          count: 1
+      - equal:
+          path: spec.maxUnavailable
+          value: 1
