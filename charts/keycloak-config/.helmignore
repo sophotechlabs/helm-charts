@@ -5,6 +5,8 @@
 *.tmp
 *.bak
 *.swp
-tests/
-ci/
-__snapshot__/
+# Anchored: an unanchored tests/ also matches templates/tests/, which would
+# quietly drop the helm test hooks out of the packaged chart.
+/tests/
+/ci/
+/__snapshot__/
