@@ -1,0 +1,4 @@
+# A second worker, so the clustered scenario has somewhere to spread to and a
+# topology constraint means something.
+nodes:
+  - role: worker

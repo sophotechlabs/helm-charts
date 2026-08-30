@@ -5,7 +5,9 @@
 # kubeconform placeholders survive verbatim.
 kubeconform_schemas := 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
 render_dir := justfile_directory() / 'dist/render'
-kind_cluster := 'helm-charts'
+kind_dir := 'test/kind'
+kind_merged := '.tmp/kind'
+kind_cluster := env_var_or_default('HELM_CHARTS_KIND_CLUSTER', 'helm-charts')
 
 # list recipes
 default:
@@ -64,7 +66,7 @@ _render:
         done
     done
     if [ "$count" -eq 0 ]; then
-        echo "no scenarios found under test/render — that is a bug in the test layout, not a pass"
+        echo "no ci/*-values.yaml scenarios found — that is a bug in the test layout, not a pass"
         exit 1
     fi
     echo "rendered $count scenarios"
@@ -134,36 +136,71 @@ ct-lint:
 
 # ── live cluster ──────────────────────────────────────────────────────────────
 
-# create the kind cluster the live gates run against
-kind-up:
+# merge the kind config chain for a tier into .tmp/kind/<tier>.yaml
+[private]
+kind-config tier:
     #!/usr/bin/env bash
     set -euo pipefail
-    if kind get clusters 2>/dev/null | grep -qx '{{ kind_cluster }}'; then
-        echo "cluster {{ kind_cluster }} already exists"
-        exit 0
+    case '{{ tier }}' in
+        bare)
+            chain=('{{ kind_dir }}/kind.yaml')
+            ;;
+        e2e)
+            chain=('{{ kind_dir }}/kind.yaml' '{{ kind_dir }}/kind-e2e.yaml')
+            ;;
+        *)
+            echo "kind-config: {{ tier }} is not one of bare, e2e"
+            exit 1
+            ;;
+    esac
+    mkdir -p {{ kind_merged }}
+    yq eval-all '. as $item ireduce ({}; . *+ $item)' "${chain[@]}" > {{ kind_merged }}/{{ tier }}.yaml
+    echo "kind-config: {{ kind_merged }}/{{ tier }}.yaml is ${chain[*]} merged, $(yq '.nodes | length' {{ kind_merged }}/{{ tier }}.yaml) nodes"
+
+# create the cluster for a tier, idempotently
+[private]
+cluster-up tier:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just kind-config {{ tier }}
+    config={{ kind_merged }}/{{ tier }}.yaml
+    name={{ kind_cluster }}-{{ tier }}
+    if ! kind get clusters | grep -qx "$name"; then
+        kind create cluster --name "$name" --config "$config" --wait 300s
     fi
-    kind create cluster --name {{ kind_cluster }} --wait 120s
+    wanted=$(yq '.nodes | length' "$config")
+    running=$(kind get nodes --name "$name" | wc -l | tr -d ' ')
+    if [ "$running" != "$wanted" ]; then
+        echo "cluster $name runs $running nodes, not the $wanted in $config; just cluster-down {{ tier }} first"
+        exit 1
+    fi
+    kubectl --context "kind-$name" cluster-info
+    kubectl --context "kind-$name" get nodes
 
-kind-down:
-    -kind delete cluster --name {{ kind_cluster }}
+# a cluster with nothing installed on it, which is what makes the bare-cluster
+# claim testable
+cluster-bare: (cluster-up 'bare')
 
-# install the CRDs the render scenarios reference (no controllers)
+# a cluster with the operators the charts can drive
+cluster-e2e: (cluster-up 'e2e')
+    KUBECONFIG_CONTEXT=kind-{{ kind_cluster }}-e2e ./hack/install-operators.sh
+
+cluster-down tier:
+    -kind delete cluster --name {{ kind_cluster }}-{{ tier }}
+
+# install the CRDs the render scenarios reference (schemas only, no controllers)
 crds:
     ./hack/install-crds.sh
 
-# install the operators the end-to-end run actually needs
-operators:
-    ./hack/install-operators.sh
+# the claim the repo exists to make: a realm file in git becomes users, groups
+# and role mappings in a running Keycloak, a password the user chose survives a
+# reconcile, and a user removed from the file loses access
+e2e: cluster-e2e
+    KUBECONFIG_CONTEXT=kind-{{ kind_cluster }}-e2e ./hack/e2e.sh
 
-# the claim the repo exists to make: a realm file in git becomes users,
-# groups and role mappings in a running Keycloak
-e2e:
-    ./hack/e2e.sh
-
-# the bare-cluster claim: with every mode off, the charts install on a cluster
-# that has no CRDs at all
-e2e-bare:
-    ./hack/e2e-bare.sh
+# the bare-cluster claim, on a cluster that genuinely has no CRDs
+e2e-bare: cluster-bare
+    KUBECONFIG_CONTEXT=kind-{{ kind_cluster }}-bare ./hack/e2e-bare.sh
 
 # ── hygiene ───────────────────────────────────────────────────────────────────
 
