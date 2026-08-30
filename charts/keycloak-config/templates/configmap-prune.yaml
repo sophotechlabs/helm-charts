@@ -1,0 +1,113 @@
+{{- if .Values.prune.enabled }}
+{{- $realm := fromYaml (include "keycloak-config.realmText" .) }}
+{{- $desired := list }}
+{{- range $realm.users }}
+{{- $desired = append $desired .username }}
+{{- end }}
+{{- range .Values.prune.exclude }}
+{{- $desired = append $desired . }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "keycloak-config.pruneConfigMapName" . }}
+  labels:
+    {{- include "keycloak-config.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  {{/*
+  The desired set is computed by Helm from the same realm text config-cli
+  applies, so the script needs no YAML parser and the two can never disagree.
+  */}}
+  desired.txt: |
+    {{- range $desired | uniq | sortAlpha }}
+    {{ . }}
+    {{- end }}
+  prune.sh: |
+    #!/bin/sh
+    # Disables realm users absent from the realm file. config-cli cannot delete
+    # users, so without this a user removed from git keeps a working account.
+    set -eu
+
+    KC=/opt/keycloak/bin/kcadm.sh
+    CFG=/tmp/kcadm/kcadm.config
+    WORK=/tmp/prune
+    mkdir -p "$WORK" "$(dirname "$CFG")"
+
+    # --config must be absolute: kcadm takes the parent of the path and fails
+    # on a bare filename. The default location is under the image's home
+    # directory, which is not writable here.
+    {{- if eq .Values.auth.mode "password" }}
+    "$KC" config credentials --config "$CFG" \
+      --server "$KEYCLOAK_URL" --realm "$KEYCLOAK_LOGINREALM" --user "$KEYCLOAK_USER"
+    {{- else }}
+    "$KC" config credentials --config "$CFG" \
+      --server "$KEYCLOAK_URL" --realm "$KEYCLOAK_LOGINREALM" --client "$KEYCLOAK_CLIENTID"
+    {{- end }}
+
+    REALM="{{ include "keycloak-config.realmName" . }}"
+    PAGE={{ .Values.prune.pageSize }}
+
+    # users/count is the only place the server reports a total; the list
+    # endpoint returns 100 at a time and says nothing about the rest.
+    TOTAL=$("$KC" get users/count -r "$REALM" --config "$CFG")
+    echo "realm $REALM reports $TOTAL users"
+
+    : > "$WORK/actual.txt"
+    OFFSET=0
+    while :; do
+      # -r is the realm to act on; --realm would be the realm to log in to.
+      # briefRepresentation trims the wire payload without changing which
+      # users the server includes.
+      "$KC" get users -r "$REALM" --config "$CFG" \
+        -q briefRepresentation=true \
+        --offset "$OFFSET" --limit "$PAGE" \
+        --fields username --format csv --noquotes > "$WORK/page.txt"
+      GOT=$(wc -l < "$WORK/page.txt" | tr -d ' ')
+      cat "$WORK/page.txt" >> "$WORK/actual.txt"
+      OFFSET=$((OFFSET + PAGE))
+      [ "$GOT" -lt "$PAGE" ] && break
+    done
+
+    SEEN=$(wc -l < "$WORK/actual.txt" | tr -d ' ')
+    if [ "$SEEN" -ne "$TOTAL" ]; then
+      # Enumeration is ordered by username and stable against our own writes,
+      # so a mismatch means someone else changed the realm mid-run. Disabling
+      # accounts on a partial view is not something to do quietly.
+      echo "enumerated $SEEN users but the realm reports $TOTAL; refusing to prune on a partial view" >&2
+      exit 1
+    fi
+
+    DISABLED=0
+    while IFS= read -r username; do
+      [ -n "$username" ] || continue
+      case "$username" in
+        service-account-*) continue ;;
+      esac
+      if grep -qxF "$username" /prune/desired.txt; then
+        continue
+      fi
+
+      # exact=true matters twice: without it this is a substring match, and it
+      # also flips the server to including service accounts.
+      ID=$("$KC" get users -r "$REALM" --config "$CFG" \
+        -q "username=$username" -q exact=true \
+        --fields id --format csv --noquotes)
+      LINES=$(printf '%s\n' "$ID" | grep -c . || true)
+      if [ "$LINES" -ne 1 ]; then
+        echo "expected exactly one id for $username, got $LINES" >&2
+        exit 1
+      fi
+
+      # A plain update does GET, merge, PUT. --no-merge would write only the
+      # field named here and wipe everything else on the user.
+      "$KC" update "users/$ID" -r "$REALM" --config "$CFG" -s enabled=false
+      echo "disabled $username"
+      DISABLED=$((DISABLED + 1))
+    done < "$WORK/actual.txt"
+
+    echo "prune complete: $DISABLED disabled, $SEEN examined"
+{{- end }}
