@@ -1,0 +1,287 @@
+suite: apply job and reconcile schedule
+templates:
+  - templates/job.yaml
+  - templates/cronjob.yaml
+  - templates/configmap-env.yaml
+set:
+  keycloak.url: http://keycloak:8080
+  auth.existingSecret: keycloak-admin
+  substitution.existingSecret: realm-secrets
+  realm.spec: |
+    realm: demo
+    users:
+      - username: alice
+        credentials:
+          - type: password
+            value: hunter2
+            userLabel: initial
+tests:
+  # A Job's pod template is immutable, so a changed realm has to produce a new
+  # object rather than a patch to the old one.
+  - it: puts a hash of the realm in the apply job's name
+    asserts:
+      - template: templates/job.yaml
+        matchRegex:
+          path: metadata.name
+          pattern: ^RELEASE-NAME-keycloak-config-apply-[0-9a-f]{10}$
+
+  - it: creates a cron job on the reconcile schedule
+    set:
+      reconcile.schedule: "*/5 * * * *"
+    asserts:
+      - template: templates/cronjob.yaml
+        equal:
+          path: spec.schedule
+          value: "*/5 * * * *"
+
+  # config-cli takes no lock, so two overlapping runs can interleave a whole
+  # realm update.
+  - it: never lets two reconciles overlap
+    asserts:
+      - template: templates/cronjob.yaml
+        equal:
+          path: spec.concurrencyPolicy
+          value: Forbid
+
+  - it: can be install-only
+    set:
+      reconcile.enabled: false
+    asserts:
+      - template: templates/cronjob.yaml
+        hasDocuments:
+          count: 0
+      - template: templates/job.yaml
+        hasDocuments:
+          count: 1
+
+  - it: can be schedule-only
+    set:
+      apply.enabled: false
+    asserts:
+      - template: templates/job.yaml
+        hasDocuments:
+          count: 0
+      - template: templates/cronjob.yaml
+        hasDocuments:
+          count: 1
+
+  # With the cache on, an unchanged file short-circuits the whole import, so
+  # nothing edited in the admin console is ever corrected.
+  - it: turns the checksum cache off so the schedule corrects drift
+    asserts:
+      - template: templates/configmap-env.yaml
+        equal:
+          path: data.IMPORT_CACHE_ENABLED
+          value: "false"
+
+  - it: allows the cache to be turned back on
+    set:
+      reconcile.cache: true
+    asserts:
+      - template: templates/configmap-env.yaml
+        equal:
+          path: data.IMPORT_CACHE_ENABLED
+          value: "true"
+
+  - it: waits for Keycloak rather than failing on connection refused
+    asserts:
+      - template: templates/configmap-env.yaml
+        equal:
+          path: data.KEYCLOAK_AVAILABILITYCHECK_ENABLED
+          value: "true"
+
+  # Deleting an authentication flow or an identity provider is not bounded by
+  # remote state, so neither defaults to full.
+  - it: does not delete authentication flows or identity providers by default
+    asserts:
+      - template: templates/configmap-env.yaml
+        equal:
+          path: data.IMPORT_MANAGED_AUTHENTICATIONFLOW
+          value: no-delete
+      - template: templates/configmap-env.yaml
+        equal:
+          path: data.IMPORT_MANAGED_IDENTITYPROVIDER
+          value: no-delete
+
+  - it: does enforce clients, roles and groups
+    asserts:
+      - template: templates/configmap-env.yaml
+        equal:
+          path: data.IMPORT_MANAGED_CLIENT
+          value: full
+      - template: templates/configmap-env.yaml
+        equal:
+          path: data.IMPORT_MANAGED_GROUP
+          value: full
+      - template: templates/configmap-env.yaml
+        equal:
+          path: data.IMPORT_MANAGED_ROLE
+          value: full
+
+  - it: authenticates as a user by default
+    asserts:
+      - template: templates/configmap-env.yaml
+        equal:
+          path: data.KEYCLOAK_USER
+          value: admin
+      - template: templates/job.yaml
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: keycloak-admin
+                key: password
+
+  - it: authenticates as a service account when asked
+    set:
+      auth.mode: client
+      auth.clientId: keycloak-config
+      auth.existingSecret: kc-config-client
+    asserts:
+      - template: templates/configmap-env.yaml
+        equal:
+          path: data.KEYCLOAK_CLIENTID
+          value: keycloak-config
+      - template: templates/configmap-env.yaml
+        equal:
+          path: data.KEYCLOAK_GRANTTYPE
+          value: client_credentials
+      - template: templates/job.yaml
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KEYCLOAK_CLIENTSECRET
+            valueFrom:
+              secretKeyRef:
+                name: kc-config-client
+                key: client-secret
+
+  - it: exposes the substitution secret to config-cli
+    asserts:
+      - template: templates/job.yaml
+        contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            secretRef:
+              name: realm-secrets
+---
+suite: prune
+templates:
+  - templates/job.yaml
+  - templates/cronjob.yaml
+  - templates/configmap-prune.yaml
+set:
+  keycloak.url: http://keycloak:8080
+  auth.existingSecret: keycloak-admin
+  substitution.existingSecret: realm-secrets
+  realm.spec: |
+    realm: demo
+    users:
+      - username: alice
+        credentials:
+          - type: password
+            value: hunter2
+            userLabel: initial
+      - username: bob
+tests:
+  - it: is off by default
+    asserts:
+      - template: templates/configmap-prune.yaml
+        hasDocuments:
+          count: 0
+      - template: templates/job.yaml
+        lengthEqual:
+          path: spec.template.spec.containers
+          count: 1
+      - template: templates/job.yaml
+        equal:
+          path: spec.template.spec.containers[0].name
+          value: config-cli
+
+  # An init container is guaranteed to finish before the main one; two
+  # containers in a pod would race.
+  - it: runs config-cli first and prune second when enabled
+    set:
+      prune.enabled: true
+    asserts:
+      - template: templates/job.yaml
+        equal:
+          path: spec.template.spec.initContainers[0].name
+          value: config-cli
+      - template: templates/job.yaml
+        equal:
+          path: spec.template.spec.containers[0].name
+          value: prune
+      - template: templates/cronjob.yaml
+        equal:
+          path: spec.jobTemplate.spec.template.spec.initContainers[0].name
+          value: config-cli
+
+  - it: computes the desired usernames from the same realm text
+    set:
+      prune.enabled: true
+    asserts:
+      - template: templates/configmap-prune.yaml
+        matchRegex:
+          path: data["desired.txt"]
+          pattern: alice
+      - template: templates/configmap-prune.yaml
+        matchRegex:
+          path: data["desired.txt"]
+          pattern: bob
+
+  - it: keeps excluded usernames out of the disable set
+    set:
+      prune.enabled: true
+      prune.exclude:
+        - break-glass
+    asserts:
+      - template: templates/configmap-prune.yaml
+        matchRegex:
+          path: data["desired.txt"]
+          pattern: break-glass
+
+  # kcadm reads the credential from the environment so it never lands in argv.
+  - it: passes the prune credential by environment, not by flag
+    set:
+      prune.enabled: true
+    asserts:
+      - template: templates/job.yaml
+        contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: KC_CLI_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: keycloak-admin
+                key: password
+
+  - it: pages explicitly, because the admin API returns 100 users and says nothing about the rest
+    set:
+      prune.enabled: true
+      prune.pageSize: 250
+    asserts:
+      - template: templates/configmap-prune.yaml
+        matchRegex:
+          path: data["prune.sh"]
+          pattern: PAGE=250
+
+  - it: skips service account users
+    set:
+      prune.enabled: true
+    asserts:
+      - template: templates/configmap-prune.yaml
+        matchRegex:
+          path: data["prune.sh"]
+          pattern: service-account-\*
+
+  - it: refuses to act on a partial enumeration
+    set:
+      prune.enabled: true
+    asserts:
+      - template: templates/configmap-prune.yaml
+        matchRegex:
+          path: data["prune.sh"]
+          pattern: refusing to prune on a partial view

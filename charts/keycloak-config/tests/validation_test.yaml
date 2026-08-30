@@ -1,0 +1,144 @@
+suite: realm guards
+templates:
+  - templates/secret-realm.yaml
+set:
+  keycloak.url: http://keycloak:8080
+  auth.existingSecret: keycloak-admin
+  substitution.existingSecret: realm-secrets
+tests:
+  # config-cli always sees a user with a password as changed, because the user
+  # the admin API returns never carries credentials. Without this label the
+  # password is re-hashed on every run, reverting whatever the person chose.
+  - it: rejects a password credential without userLabel initial
+    set:
+      realm.spec: |
+        realm: demo
+        users:
+          - username: alice
+            credentials:
+              - type: password
+                value: hunter2
+    asserts:
+      - failedTemplate:
+          errorPattern: |-
+            must carry userLabel: initial
+
+  - it: names the offending user
+    set:
+      realm.spec: |
+        realm: demo
+        users:
+          - username: carol
+            credentials:
+              - type: password
+                value: hunter2
+    asserts:
+      - failedTemplate:
+          errorPattern: credential for user carol
+
+  # A temporary password re-adds UPDATE_PASSWORD every run.
+  - it: rejects a temporary password
+    set:
+      realm.spec: |
+        realm: demo
+        users:
+          - username: bob
+            credentials:
+              - type: password
+                value: hunter2
+                userLabel: initial
+                temporary: true
+    asserts:
+      - failedTemplate:
+          errorPattern: |-
+            sets temporary: true
+
+  - it: accepts a create-only password
+    set:
+      realm.spec: |
+        realm: demo
+        users:
+          - username: alice
+            credentials:
+              - type: password
+                value: hunter2
+                userLabel: initial
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: ignores non-password credentials
+    set:
+      realm.spec: |
+        realm: demo
+        users:
+          - username: alice
+            credentials:
+              - type: otp
+                value: seed
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: accepts users with no credentials at all
+    set:
+      realm.spec: |
+        realm: demo
+        users:
+          - username: alice
+    asserts:
+      - notFailedTemplate: {}
+
+  - it: rejects a realm with no realm key
+    set:
+      realm.spec: |
+        enabled: true
+    asserts:
+      - failedTemplate:
+          errorPattern: no top-level realm
+
+  - it: rejects unparseable YAML
+    set:
+      realm.spec: |
+        realm: demo
+        users: [unclosed
+    asserts:
+      - failedTemplate:
+          errorPattern: not parseable as YAML
+
+  # Placeholders that resolve to nothing would write empty client secrets.
+  - it: rejects env placeholders with no secret to resolve them from
+    set:
+      substitution.existingSecret: ""
+      realm.spec: |
+        realm: demo
+        clients:
+          - clientId: grafana
+            secret: $(env:GRAFANA_CLIENT_SECRET)
+    asserts:
+      - failedTemplate:
+          errorPattern: substitution.existingSecret is not set
+
+  - it: rejects a missing realm
+    set:
+      realm.spec: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: realm.spec
+
+  - it: rejects a missing keycloak url
+    set:
+      keycloak.url: ""
+      realm.spec: |
+        realm: demo
+    asserts:
+      - failedTemplate:
+          errorPattern: keycloak.url
+
+  - it: rejects client auth with no client id
+    set:
+      auth.mode: client
+      auth.clientId: ""
+      realm.spec: |
+        realm: demo
+    asserts:
+      - failedTemplate:
+          errorPattern: clientId

@@ -1,0 +1,216 @@
+# -- Override the chart name used in resource names and labels.
+nameOverride: ""
+# -- Override the full release-qualified name used for every resource.
+fullnameOverride: ""
+# -- Labels added to every object this chart creates.
+commonLabels: {}
+# -- Annotations added to every object this chart creates.
+commonAnnotations: {}
+
+keycloak:
+  # -- Base URL of the Keycloak to configure. Point this at the in-cluster
+  # Service over plain HTTP: the admin client does not recognise a 308
+  # redirect and fails with an unparseable error if it meets one, and an
+  # `http://` URL also removes any truststore question.
+  url: ""
+  # -- Realm to authenticate against. Almost always `master`.
+  authRealm: master
+
+auth:
+  # -- `password` authenticates as a user; `client` uses a confidential
+  # client's service account, which is the better fit for an unattended job.
+  mode: password
+  # -- Secret holding the credential. Required — the admin CLI otherwise falls
+  # back to an interactive prompt, which in a Job hangs rather than fails.
+  existingSecret: ""
+  # -- Admin username, when mode is `password`.
+  username: admin
+  # -- Key in the secret holding the admin password, when mode is `password`.
+  passwordKey: password
+  # -- Client ID, when mode is `client`.
+  clientId: ""
+  # -- Key in the secret holding the client secret, when mode is `client`.
+  clientSecretKey: client-secret
+
+realm:
+  # -- The realm definition, as YAML or JSON text. Supply it by path rather
+  # than by hand: `--set-file realm.spec=./realm.yaml` on the CLI, or under
+  # Flux a `valuesFrom` entry with `targetPath: realm.spec`.
+  spec: ""
+  # -- Render `realm.spec` through Helm's template engine first, so it can
+  # carry `{{ .Values… }}` references. Keycloak's own `${…}` placeholders and
+  # config-cli's `$(env:…)` are untouched by this.
+  template: true
+
+substitution:
+  # -- Resolve `$(env:NAME)` placeholders in the realm from environment
+  # variables. This is how client secrets and user passwords stay out of the
+  # realm file.
+  enabled: true
+  # -- Secret whose keys become environment variables for the substitution.
+  # Every key in it is exposed, so keep it to realm values.
+  existingSecret: ""
+  # -- Extra environment variables for substitution.
+  extraEnv: []
+
+reconcile:
+  # -- Re-apply the realm on a schedule, correcting anything changed in the
+  # admin console since the last run.
+  enabled: true
+  # -- Cron schedule for the re-apply.
+  schedule: "*/15 * * * *"
+  # -- IANA time zone for the schedule.
+  timeZone: ""
+  # -- Skip the run when the realm file has not changed since the last apply.
+  # config-cli stores a checksum on the realm and short-circuits on a match,
+  # so leaving this on means the schedule only re-applies after a git change
+  # and does NOT correct console drift. Off is what makes it a drift loop.
+  cache: false
+  # -- Successful jobs kept.
+  successfulJobsHistoryLimit: 1
+  # -- Failed jobs kept.
+  failedJobsHistoryLimit: 3
+  # -- Seconds a missed schedule may still start within.
+  startingDeadlineSeconds: 300
+  # -- Retries before a scheduled run is given up on.
+  backoffLimit: 2
+
+apply:
+  # -- Run once per release, applying the realm as soon as the chart is
+  # installed or upgraded. The job's name carries a hash of the realm, so a
+  # changed realm creates a new job rather than trying to patch an immutable
+  # one.
+  enabled: true
+  # -- Retries before the apply is given up on.
+  backoffLimit: 3
+  # -- Seconds a finished apply job is kept before Kubernetes removes it.
+  ttlSecondsAfterFinished: 3600
+
+prune:
+  # -- Disable realm users that are absent from `realm.spec`.
+  #
+  # config-cli cannot delete users at all — it logs that purging users is not
+  # supported. What it does do is enforce roles and group memberships, so a
+  # user removed from the file loses their access but keeps a working account.
+  # This closes that gap by disabling the account as well. It is off by
+  # default because it acts on users this chart never created.
+  enabled: false
+  # -- Usernames never disabled, whatever the realm file says. Keycloak's own
+  # `service-account-*` users are always skipped.
+  exclude: []
+  # -- Users fetched per request. The admin API returns 100 at a time and says
+  # nothing about the rest, so the script pages explicitly.
+  pageSize: 100
+
+configCli:
+  image:
+    # -- keycloak-config-cli image registry.
+    registry: docker.io
+    # -- keycloak-config-cli image repository.
+    repository: adorsys/keycloak-config-cli
+    # -- Image tag. The suffix is the Keycloak version its admin client was
+    # built against; the realm parser rejects unknown fields outright, so a
+    # server newer than this tag can fail the whole import.
+    tag: "6.5.1-26.5.5"
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+  # -- Wait for Keycloak to answer before importing. config-cli's own default
+  # is not to wait, which fails a job that starts alongside Keycloak.
+  availabilityCheck:
+    # -- Wait for Keycloak to become available.
+    enabled: true
+    # -- How long to wait.
+    timeout: 300s
+  # -- Per-entity deletion policy, `import.managed.*`. `full` deletes entities
+  # present in Keycloak and absent from the file; `no-delete` leaves them.
+  # Authentication flows and identity providers are called out because their
+  # deletions are not bounded by remote state.
+  managed:
+    authenticationFlow: no-delete
+    identityProvider: no-delete
+    identityProviderMapper: no-delete
+    client: full
+    clientScope: full
+    group: full
+    requiredAction: no-delete
+    role: full
+    scopeMapping: full
+    subGroup: full
+  # -- Extra `IMPORT_*` / `KEYCLOAK_*` environment for config-cli.
+  extraEnv: []
+  # -- Log level. Note that setting the realm-config logger to trace prints
+  # the fully substituted realm, passwords included.
+  logLevel: info
+
+keycloakImage:
+  # -- Image providing `kcadm.sh` for the prune step. Use the same Keycloak
+  # version as the server.
+  registry: quay.io
+  # -- Repository.
+  repository: keycloak/keycloak
+  # -- Tag.
+  tag: "26.7.2"
+  # -- Image pull policy.
+  pullPolicy: IfNotPresent
+
+# -- Image pull secrets for both images.
+imagePullSecrets: []
+
+serviceAccount:
+  # -- Create a ServiceAccount.
+  create: true
+  # -- Name of the ServiceAccount. Generated when empty.
+  name: ""
+  # -- Annotations on the ServiceAccount.
+  annotations: {}
+
+# -- Pod security context.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 0
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container security context. `readOnlyRootFilesystem` is false because the
+# config-cli JVM writes to its own root filesystem.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop:
+      - ALL
+
+# -- Resources for the config-cli container.
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+# -- Resources for the prune container.
+pruneResources:
+  requests:
+    cpu: 50m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+
+# -- Node selector for the jobs.
+nodeSelector: {}
+# -- Tolerations for the jobs.
+tolerations: []
+# -- Affinity for the jobs.
+affinity: {}
+# -- Priority class for the jobs.
+priorityClassName: ""
+
+# -- Extra volumes on the jobs.
+extraVolumes: []
+# -- Extra volume mounts on the config-cli container.
+extraVolumeMounts: []
+
+# -- Arbitrary extra manifests, rendered through `tpl`.
+extraObjects: []

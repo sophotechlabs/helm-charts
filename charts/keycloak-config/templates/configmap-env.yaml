@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "keycloak-config.envConfigMapName" . }}
+  labels:
+    {{- include "keycloak-config.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  KEYCLOAK_URL: {{ .Values.keycloak.url | quote }}
+  KEYCLOAK_LOGINREALM: {{ .Values.keycloak.authRealm | quote }}
+  {{- if eq .Values.auth.mode "password" }}
+  KEYCLOAK_USER: {{ .Values.auth.username | quote }}
+  {{- else }}
+  KEYCLOAK_CLIENTID: {{ .Values.auth.clientId | quote }}
+  KEYCLOAK_GRANTTYPE: client_credentials
+  {{- end }}
+  KEYCLOAK_AVAILABILITYCHECK_ENABLED: {{ .Values.configCli.availabilityCheck.enabled | quote }}
+  KEYCLOAK_AVAILABILITYCHECK_TIMEOUT: {{ .Values.configCli.availabilityCheck.timeout | quote }}
+  IMPORT_FILES_LOCATIONS: /config/realm.yaml
+  IMPORT_VARSUBSTITUTION_ENABLED: {{ .Values.substitution.enabled | quote }}
+  {{/*
+  With the cache on, config-cli stores a checksum on the realm and skips the
+  entire import when the file is unchanged — clients, roles, groups and users
+  alike. That makes the schedule a re-apply-on-change loop rather than a drift
+  loop, which is the opposite of what most people assume it does.
+  */}}
+  IMPORT_CACHE_ENABLED: {{ .Values.reconcile.cache | quote }}
+  IMPORT_MANAGED_AUTHENTICATIONFLOW: {{ .Values.configCli.managed.authenticationFlow | quote }}
+  IMPORT_MANAGED_IDENTITYPROVIDER: {{ .Values.configCli.managed.identityProvider | quote }}
+  IMPORT_MANAGED_IDENTITYPROVIDERMAPPER: {{ .Values.configCli.managed.identityProviderMapper | quote }}
+  IMPORT_MANAGED_CLIENT: {{ .Values.configCli.managed.client | quote }}
+  IMPORT_MANAGED_CLIENTSCOPE: {{ .Values.configCli.managed.clientScope | quote }}
+  IMPORT_MANAGED_GROUP: {{ .Values.configCli.managed.group | quote }}
+  IMPORT_MANAGED_REQUIREDACTION: {{ .Values.configCli.managed.requiredAction | quote }}
+  IMPORT_MANAGED_ROLE: {{ .Values.configCli.managed.role | quote }}
+  IMPORT_MANAGED_SCOPEMAPPING: {{ .Values.configCli.managed.scopeMapping | quote }}
+  IMPORT_MANAGED_SUBGROUP: {{ .Values.configCli.managed.subGroup | quote }}
+  LOGGING_LEVEL_ROOT: {{ .Values.configCli.logLevel | quote }}

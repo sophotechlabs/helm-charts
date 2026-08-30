@@ -1,0 +1,44 @@
+keycloak:
+  url: http://keycloak.keycloak.svc.cluster.local:8080
+auth:
+  mode: password
+  existingSecret: keycloak-admin
+  username: admin
+  passwordKey: password
+substitution:
+  enabled: true
+  existingSecret: keycloak-realm-secrets
+realm:
+  spec: |
+    realm: demo
+    enabled: true
+    displayName: Demo
+    roles:
+      client:
+        grafana:
+          - name: admin
+    groups:
+      - name: admins
+        clientRoles:
+          grafana:
+            - admin
+    clients:
+      - clientId: grafana
+        enabled: true
+        protocol: openid-connect
+        publicClient: false
+        secret: $(env:GRAFANA_CLIENT_SECRET)
+        redirectUris:
+          - https://grafana.example.com/login/generic_oauth
+    users:
+      - username: alice
+        enabled: true
+        email: alice@example.com
+        firstName: Alice
+        lastName: Example
+        credentials:
+          - type: password
+            value: $(env:ALICE_PASSWORD)
+            userLabel: initial
+        groups:
+          - /admins

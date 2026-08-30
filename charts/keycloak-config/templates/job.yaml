@@ -1,0 +1,33 @@
+{{- if .Values.apply.enabled }}
+{{/*
+Deliberately not a Helm hook. A hook is invisible to the release inventory, so
+Flux never prunes it, and helm-controller does not re-run hooks on a
+drift-correcting reconcile anyway. A plain Job carrying a hash of the realm in
+its name gets both properties for free: a changed realm is a new object, and an
+unchanged one is left alone rather than patched — which matters because a Job's
+pod template is immutable once created.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "%s-apply-%s" (include "keycloak-config.fullname" .) (include "keycloak-config.realmHash" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{- include "keycloak-config.labels" . | nindent 4 }}
+    app.kubernetes.io/component: apply
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  backoffLimit: {{ .Values.apply.backoffLimit }}
+  {{- with .Values.apply.ttlSecondsAfterFinished }}
+  ttlSecondsAfterFinished: {{ . }}
+  {{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "keycloak-config.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: apply
+    spec:
+      {{- include "keycloak-config.jobPodSpec" . | nindent 6 }}
+{{- end }}

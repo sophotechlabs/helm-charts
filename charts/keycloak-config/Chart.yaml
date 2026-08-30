@@ -1,0 +1,29 @@
+---
+apiVersion: v2
+name: keycloak-config
+description: Keeps a Keycloak realm — clients, scopes, roles, groups and users — matching a YAML file in git
+type: application
+version: 0.0.0
+appVersion: "6.5.1"
+home: https://github.com/sophotechlabs/helm-charts
+icon: https://raw.githubusercontent.com/keycloak/keycloak-misc/main/logo/icon.svg
+sources:
+  - https://github.com/sophotechlabs/helm-charts/tree/main/charts/keycloak-config
+  - https://github.com/adorsys/keycloak-config-cli
+keywords:
+  - keycloak
+  - identity
+  - gitops
+  - realm
+  - users
+maintainers:
+  - name: Sophotech s.r.o.
+    url: https://sopho.tech
+annotations:
+  artifacthub.io/category: security
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/links: |
+    - name: keycloak-config-cli
+      url: https://github.com/adorsys/keycloak-config-cli
+    - name: Chart source
+      url: https://github.com/sophotechlabs/helm-charts/tree/main/charts/keycloak-config
