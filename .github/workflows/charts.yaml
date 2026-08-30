@@ -66,14 +66,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518
-      - run: just kind-up
       - run: just e2e
       - if: failure()
         run: |
-          kubectl -n keycloak-e2e get all
-          kubectl -n keycloak-e2e describe pods
-          kubectl -n keycloak-e2e logs -l app.kubernetes.io/name=keycloak --tail=200 || true
-          kubectl -n keycloak-e2e logs -l app.kubernetes.io/name=keycloak-config --tail=200 || true
+          kubectl --context kind-helm-charts-e2e -n keycloak-e2e get all
+          kubectl --context kind-helm-charts-e2e -n keycloak-e2e describe pods
+          kubectl --context kind-helm-charts-e2e -n keycloak-e2e logs -l app.kubernetes.io/name=keycloak --tail=200 || true
+          kubectl --context kind-helm-charts-e2e -n keycloak-e2e logs -l app.kubernetes.io/name=keycloak-config --tail=200 || true
 
   # Runs on its own cluster with no CRDs installed, because checking the
   # bare-cluster claim next to the operators would prove nothing.
@@ -85,10 +84,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518
-      - run: just kind-up
       - run: just e2e-bare
       - if: failure()
         run: |
-          kubectl -n keycloak-bare get all
-          kubectl -n keycloak-bare describe pods
-          kubectl -n keycloak-bare logs -l app.kubernetes.io/name=keycloak --tail=200 || true
+          kubectl --context kind-helm-charts-bare -n keycloak-bare get all
+          kubectl --context kind-helm-charts-bare -n keycloak-bare describe pods
+          kubectl --context kind-helm-charts-bare -n keycloak-bare logs -l app.kubernetes.io/name=keycloak --tail=200 || true

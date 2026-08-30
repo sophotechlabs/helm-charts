@@ -7,8 +7,25 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CTX="${KUBECONFIG_CONTEXT:-}"
 NS="${BARE_NAMESPACE:-keycloak-bare}"
 RELEASE=bare
+
+k() {
+  if [ -n "$CTX" ]; then
+    kubectl --context "$CTX" "$@"
+  else
+    kubectl "$@"
+  fi
+}
+
+h() {
+  if [ -n "$CTX" ]; then
+    helm --kube-context "$CTX" "$@"
+  else
+    helm "$@"
+  fi
+}
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 fail() { printf '\033[31mFAIL\033[0m %s\n' "$1" >&2; exit 1; }
@@ -22,16 +39,16 @@ for crd in \
   httproutes.gateway.networking.k8s.io \
   servicemonitors.monitoring.coreos.com
 do
-  if kubectl get crd "$crd" >/dev/null 2>&1; then
+  if k get crd "$crd" >/dev/null 2>&1; then
     fail "$crd is installed, so this run would not prove anything"
   fi
 done
 ok "none of the optional CRDs are present"
 
-kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
+k get ns "$NS" >/dev/null 2>&1 || k create ns "$NS"
 
 step "a plain postgres for the external-database path"
-kubectl -n "$NS" apply -f - <<'YAML'
+k -n "$NS" apply -f - <<'YAML'
 apiVersion: v1
 kind: Secret
 metadata:
@@ -88,11 +105,11 @@ spec:
     - port: 5432
       targetPort: 5432
 YAML
-kubectl -n "$NS" rollout status deployment/postgres --timeout=5m
+k -n "$NS" rollout status deployment/postgres --timeout=5m
 ok "postgres ready"
 
 step "install with everything optional turned off"
-helm upgrade --install "$RELEASE" "$REPO_ROOT/charts/keycloak" \
+h upgrade --install "$RELEASE" "$REPO_ROOT/charts/keycloak" \
   --namespace "$NS" \
   --set keycloak.hostname=http://auth.bare.test \
   --set keycloak.hostnameStrict=false \
@@ -110,19 +127,19 @@ helm upgrade --install "$RELEASE" "$REPO_ROOT/charts/keycloak" \
   --wait --timeout 15m &
 INSTALL_PID=$!
 
-kubectl -n "$NS" create secret generic keycloak-admin \
+k -n "$NS" create secret generic keycloak-admin \
   --from-literal=password="bare-admin" \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --dry-run=client -o yaml | k apply -f -
 
 wait "$INSTALL_PID" || fail "install failed on a cluster with no CRDs"
 ok "installed with no CRDs present"
 
 step "helm test"
-helm test "$RELEASE" --namespace "$NS" --timeout 5m
+h test "$RELEASE" --namespace "$NS" --timeout 5m
 ok "keycloak answers on a bare cluster"
 
 step "nothing custom was created"
-if kubectl -n "$NS" get all -o name | grep -qiE 'cluster|certificate|ingressroute'; then
+if k -n "$NS" get all -o name | grep -qiE 'cluster|certificate|ingressroute'; then
   fail "the release created a custom resource it should not have"
 fi
 ok "only core objects exist"

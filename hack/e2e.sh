@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# The claim this repo exists to make, checked against a running Keycloak:
-# a realm file in git becomes users, groups and role mappings, a password the
-# user changes is not reverted by the next reconcile, and a user removed from
-# the file loses their access.
+# Orchestration only. The per-release assertions live in the charts as
+# `helm test` hooks, so anyone installing these charts gets the same checks
+# rather than them existing only in CI.
 #
-# Nothing here is a stub. Every assertion is read back from the Keycloak admin
-# API on the cluster.
+# What is left here is the part a single release cannot assert: behaviour
+# across an upgrade. Whether a password the user chose survives a reconcile,
+# and whether removing a user from the file takes their access away.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CTX="${KUBECONFIG_CONTEXT:-}"
 NS="${E2E_NAMESPACE:-keycloak-e2e}"
 RELEASE=kc
 CONFIG_RELEASE=kcc
 REALM=e2e
-ADMIN_PASSWORD="${E2E_ADMIN_PASSWORD:-e2e-admin-$RANDOM}"
-ALICE_PASSWORD="alice-initial-$RANDOM"
+ADMIN_PASSWORD="e2e-admin-$RANDOM$RANDOM"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -22,33 +22,48 @@ step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 fail() { printf '\033[31mFAIL\033[0m %s\n' "$1" >&2; exit 1; }
 ok()   { printf '  ok    %s\n' "$1"; }
 
-kc() {
-  # kcadm inside the running pod: no port-forward, no extra tooling, and it
-  # exercises the same server a client would.
-  kubectl -n "$NS" exec "sts/$RELEASE-keycloak" -c keycloak -- \
+k() {
+  if [ -n "$CTX" ]; then
+    kubectl --context "$CTX" "$@"
+  else
+    kubectl "$@"
+  fi
+}
+
+h() {
+  if [ -n "$CTX" ]; then
+    helm --kube-context "$CTX" "$@"
+  else
+    helm "$@"
+  fi
+}
+
+kcadm() {
+  k -n "$NS" exec "sts/$RELEASE-keycloak" -c keycloak -- \
     /opt/keycloak/bin/kcadm.sh "$@" --config /tmp/kcadm.config
 }
 
-step "cluster"
-if ! kubectl cluster-info >/dev/null 2>&1; then
-  fail "no reachable cluster; run just kind-up first"
-fi
-kubectl get ns "$NS" >/dev/null 2>&1 || kubectl create ns "$NS"
+apply_realm() {
+  # The apply job's name carries a hash of the realm, so a changed realm makes
+  # a new job. Waiting on the label picks up whichever one this upgrade made.
+  h upgrade --install "$CONFIG_RELEASE" "$REPO_ROOT/charts/keycloak-config" \
+    --namespace "$NS" "$@" --wait --timeout 5m
+  k -n "$NS" wait --for=condition=complete --timeout=5m \
+    job -l "app.kubernetes.io/instance=$CONFIG_RELEASE,app.kubernetes.io/component=apply"
+}
 
-step "operators"
-"$REPO_ROOT/hack/install-operators.sh"
-
-step "secrets"
-kubectl -n "$NS" create secret generic keycloak-admin \
+step "namespace and secrets"
+k get ns "$NS" >/dev/null 2>&1 || k create ns "$NS"
+k -n "$NS" create secret generic keycloak-admin \
   --from-literal=password="$ADMIN_PASSWORD" \
-  --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n "$NS" create secret generic realm-secrets \
-  --from-literal=ALICE_PASSWORD="$ALICE_PASSWORD" \
-  --from-literal=GRAFANA_CLIENT_SECRET="grafana-$RANDOM" \
-  --dry-run=client -o yaml | kubectl apply -f -
+  --dry-run=client -o yaml | k apply -f -
+k -n "$NS" create secret generic realm-secrets \
+  --from-literal=ALICE_PASSWORD="alice-initial-$RANDOM" \
+  --from-literal=GRAFANA_CLIENT_SECRET="grafana-$RANDOM$RANDOM" \
+  --dry-run=client -o yaml | k apply -f -
 
 step "install keycloak"
-helm upgrade --install "$RELEASE" "$REPO_ROOT/charts/keycloak" \
+h upgrade --install "$RELEASE" "$REPO_ROOT/charts/keycloak" \
   --namespace "$NS" \
   --set keycloak.hostname=http://auth.e2e.test \
   --set keycloak.hostnameStrict=false \
@@ -64,17 +79,9 @@ helm upgrade --install "$RELEASE" "$REPO_ROOT/charts/keycloak" \
   --wait --timeout 15m
 ok "keycloak ready"
 
-step "helm test"
-helm test "$RELEASE" --namespace "$NS" --timeout 5m
-ok "health and discovery endpoints answer"
-
-step "authenticate"
-kubectl -n "$NS" exec "sts/$RELEASE-keycloak" -c keycloak -- \
-  /opt/keycloak/bin/kcadm.sh config credentials \
-  --config /tmp/kcadm.config \
-  --server "http://localhost:8080" --realm master \
-  --user admin --password "$ADMIN_PASSWORD"
-ok "admin cli authenticated"
+step "helm test keycloak"
+h test "$RELEASE" --namespace "$NS" --timeout 5m
+ok "health endpoints and master realm discovery answer"
 
 step "apply a realm"
 cat > "$WORK/realm.yaml" <<EOF
@@ -101,8 +108,6 @@ users:
   - username: alice
     enabled: true
     email: alice@e2e.test
-    firstName: Alice
-    lastName: Example
     credentials:
       - type: password
         value: \$(env:ALICE_PASSWORD)
@@ -114,85 +119,59 @@ users:
     email: bob@e2e.test
 EOF
 
-helm upgrade --install "$CONFIG_RELEASE" "$REPO_ROOT/charts/keycloak-config" \
-  --namespace "$NS" \
+apply_realm \
   --set keycloak.url="http://$RELEASE-keycloak.$NS.svc.cluster.local:8080" \
   --set auth.existingSecret=keycloak-admin \
   --set auth.username=admin \
   --set substitution.existingSecret=realm-secrets \
   --set reconcile.enabled=false \
-  --set-file realm.spec="$WORK/realm.yaml" \
-  --wait --timeout 5m
-
-kubectl -n "$NS" wait --for=condition=complete --timeout=5m \
-  job -l "app.kubernetes.io/instance=$CONFIG_RELEASE,app.kubernetes.io/component=apply"
+  --set-file realm.spec="$WORK/realm.yaml"
 ok "apply job completed"
 
-step "the realm is what the file said"
-kc get "realms/$REALM" --fields realm --format csv --noquotes | grep -qx "$REALM" \
-  || fail "realm $REALM was not created"
-ok "realm exists"
+step "helm test keycloak-config"
+# This is the assertion that the realm, its groups, its clients and every
+# user's group membership match the file. It lives in the chart.
+h test "$CONFIG_RELEASE" --namespace "$NS" --timeout 5m
+ok "the realm matches the file"
 
-for user in alice bob; do
-  kc get users -r "$REALM" -q "username=$user" -q exact=true --fields username --format csv --noquotes \
-    | grep -qx "$user" || fail "user $user was not created"
-  ok "user $user exists"
-done
+step "authenticate for the cross-release assertions"
+k -n "$NS" exec "sts/$RELEASE-keycloak" -c keycloak -- \
+  /opt/keycloak/bin/kcadm.sh config credentials \
+  --config /tmp/kcadm.config \
+  --server http://localhost:8080 --realm master \
+  --user admin --password "$ADMIN_PASSWORD"
+ok "admin cli authenticated"
 
-ALICE_ID=$(kc get users -r "$REALM" -q username=alice -q exact=true --fields id --format csv --noquotes | tr -d '\r')
-[ -n "$ALICE_ID" ] || fail "could not resolve alice's id"
-
-kc get "users/$ALICE_ID/groups" -r "$REALM" --fields name --format csv --noquotes \
-  | grep -qx admins || fail "alice is not in the admins group"
-ok "alice is in admins"
-
-kc get clients -r "$REALM" -q clientId=grafana --fields clientId --format csv --noquotes \
-  | grep -qx grafana || fail "the grafana client was not created"
-ok "grafana client exists"
-
-step "a password the user chose is not reverted"
+step "a password the user chose survives a reconcile"
 # userLabel: initial makes the credential create-only. Change it out of band,
-# re-apply the same realm, and the new password must survive.
-CHOSEN="alice-chose-this-$RANDOM"
-kc set-password -r "$REALM" --username alice --new-password "$CHOSEN"
+# re-apply the same realm, and a direct grant with the new password must still
+# work — which it will not if config-cli re-hashed the credential.
+CHOSEN="alice-chose-this-$RANDOM$RANDOM"
+kcadm set-password -r "$REALM" --username alice --new-password "$CHOSEN"
 ok "password changed out of band"
 
-kubectl -n "$NS" delete job -l "app.kubernetes.io/instance=$CONFIG_RELEASE,app.kubernetes.io/component=apply" --ignore-not-found
-helm upgrade "$CONFIG_RELEASE" "$REPO_ROOT/charts/keycloak-config" \
-  --namespace "$NS" --reuse-values \
-  --set reconcile.cache=false \
-  --set-file realm.spec="$WORK/realm.yaml" \
-  --wait --timeout 5m
-kubectl -n "$NS" wait --for=condition=complete --timeout=5m \
-  job -l "app.kubernetes.io/instance=$CONFIG_RELEASE,app.kubernetes.io/component=apply"
+k -n "$NS" delete job -l "app.kubernetes.io/instance=$CONFIG_RELEASE,app.kubernetes.io/component=apply" --ignore-not-found
+apply_realm --reuse-values --set reconcile.cache=false --set-file realm.spec="$WORK/realm.yaml"
 
-# A direct grant proves the password rather than trusting the absence of a
-# write: this fails if config-cli re-hashed the credential.
-kubectl -n "$NS" exec "sts/$RELEASE-keycloak" -c keycloak -- \
+k -n "$NS" exec "sts/$RELEASE-keycloak" -c keycloak -- \
   /opt/keycloak/bin/kcadm.sh config credentials \
   --config /tmp/alice.config \
   --server http://localhost:8080 --realm "$REALM" \
   --client admin-cli --user alice --password "$CHOSEN" \
   || fail "alice's chosen password was reverted by the reconcile"
-ok "chosen password survived a reconcile"
+ok "chosen password survived"
 
-step "removing a user from the file strips their access"
-sed -e '/username: bob/,+1d' "$WORK/realm.yaml" > "$WORK/realm-no-bob.yaml"
-kubectl -n "$NS" delete job -l "app.kubernetes.io/instance=$CONFIG_RELEASE,app.kubernetes.io/component=apply" --ignore-not-found
-helm upgrade "$CONFIG_RELEASE" "$REPO_ROOT/charts/keycloak-config" \
-  --namespace "$NS" --reuse-values \
-  --set prune.enabled=true \
-  --set-file realm.spec="$WORK/realm-no-bob.yaml" \
-  --wait --timeout 5m
-kubectl -n "$NS" wait --for=condition=complete --timeout=5m \
-  job -l "app.kubernetes.io/instance=$CONFIG_RELEASE,app.kubernetes.io/component=apply"
+step "removing a user from the file takes their access away"
+grep -v -e 'username: bob' -e 'email: bob@e2e.test' "$WORK/realm.yaml" > "$WORK/realm-no-bob.yaml"
+k -n "$NS" delete job -l "app.kubernetes.io/instance=$CONFIG_RELEASE,app.kubernetes.io/component=apply" --ignore-not-found
+apply_realm --reuse-values --set prune.enabled=true --set-file realm.spec="$WORK/realm-no-bob.yaml"
 
-BOB_ENABLED=$(kc get users -r "$REALM" -q username=bob -q exact=true --fields enabled --format csv --noquotes | tr -d '\r')
-[ "$BOB_ENABLED" = "false" ] || fail "bob is still enabled after being removed from the realm file (got '$BOB_ENABLED')"
-ok "bob was disabled by the prune step"
+BOB=$(kcadm get users -r "$REALM" -q username=bob -q exact=true --fields enabled --format csv --noquotes | tr -d '\r')
+[ "$BOB" = "false" ] || fail "bob is still enabled after being removed from the realm file (got '$BOB')"
+ok "bob was disabled"
 
-ALICE_STILL=$(kc get users -r "$REALM" -q username=alice -q exact=true --fields enabled --format csv --noquotes | tr -d '\r')
-[ "$ALICE_STILL" = "true" ] || fail "alice was disabled and should not have been"
+ALICE=$(kcadm get users -r "$REALM" -q username=alice -q exact=true --fields enabled --format csv --noquotes | tr -d '\r')
+[ "$ALICE" = "true" ] || fail "alice was disabled and should not have been"
 ok "alice is untouched"
 
 printf '\n\033[32mall end-to-end assertions passed\033[0m\n'

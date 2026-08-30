@@ -5,14 +5,23 @@
 set -euo pipefail
 
 CNPG_VERSION="${CNPG_VERSION:-1.28.1}"
+CTX="${KUBECONFIG_CONTEXT:-}"
 
-if kubectl -n cnpg-system get deployment cnpg-controller-manager >/dev/null 2>&1; then
+k() {
+  if [ -n "$CTX" ]; then
+    kubectl --context "$CTX" "$@"
+  else
+    kubectl "$@"
+  fi
+}
+
+if k -n cnpg-system get deployment cnpg-controller-manager >/dev/null 2>&1; then
   echo "==> cloudnative-pg already installed"
 else
   echo "==> cloudnative-pg ${CNPG_VERSION}"
-  kubectl apply --server-side --force-conflicts \
+  k apply --server-side --force-conflicts \
     -f "https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-${CNPG_VERSION%.*}/releases/cnpg-${CNPG_VERSION}.yaml"
 fi
 
-kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=5m
+k -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=5m
 echo "==> operators ready"
