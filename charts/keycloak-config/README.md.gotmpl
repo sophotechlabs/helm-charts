@@ -1,0 +1,65 @@
+{{ template "chart.header" . }}
+
+{{ template "chart.description" . }}
+
+{{ template "chart.badgesSection" . }}
+
+## Install
+
+Supply the realm by path:
+
+```sh
+helm install keycloak-config oci://ghcr.io/sophotechlabs/charts/keycloak-config \
+  --set keycloak.url=http://keycloak.keycloak.svc.cluster.local:8080 \
+  --set auth.existingSecret=keycloak-admin \
+  --set substitution.existingSecret=keycloak-realm-secrets \
+  --set-file realm.spec=./realm.yaml
+```
+
+Under Flux, where there is no `--set-file`, point `valuesFrom` at a key:
+
+```yaml
+valuesFrom:
+  - kind: ConfigMap
+    name: keycloak-realm
+    valuesKey: realm.yaml
+    targetPath: realm.spec
+```
+
+## What reconciliation means here
+
+This is the part to read before relying on it. The work is done by [keycloak-config-cli](https://github.com/adorsys/keycloak-config-cli), and its semantics are not what "reconcile" usually implies.
+
+**Applied and enforced.** Realm settings, clients, client scopes, protocol mappers, realm and client roles, groups, and each user's role and group membership. Remove a role from a user in the file and the next run removes it in Keycloak.
+
+**Created, not enforced.** User passwords. The chart *requires* every password credential to carry `userLabel: initial`, and refuses to install otherwise. That makes the credential apply only when the user is created.
+
+The reason is worth stating plainly: config-cli compares the user it is about to write against the one the admin API returns, and the returned user never carries credentials — so a user with a password in the file always compares as changed, and Keycloak re-hashes the password on every run. On a fifteen-minute schedule that silently reverts whatever password the person chose for themselves. The `userLabel` is the documented, code-enforced way out, so this chart makes it mandatory rather than optional.
+
+For the same reason `temporary: true` is rejected: it re-adds the `UPDATE_PASSWORD` required action on every run, prompting a user who already changed their password.
+
+**Not done: deleting users.** config-cli cannot; it says so in its own logs. Removing a user from the file strips their roles and group memberships, so they lose access, but the account remains and can still log in to anything that does not check a role.
+
+`prune.enabled` closes that gap by disabling those accounts through the admin API after each apply. It is off by default because it acts on users this chart never created. It skips Keycloak's own `service-account-*` users, honours `prune.exclude`, and refuses to act at all if it cannot enumerate every user in the realm — disabling accounts on a partial view is not something to do quietly.
+
+## Drift, and the setting that decides whether there is any
+
+`reconcile.cache` defaults to **false**, and that is deliberate.
+
+config-cli stores a checksum of the realm file as an attribute on the realm and, when the cache is on, skips the entire import when the file is unchanged — clients, roles, groups and users alike. With the cache on, a schedule re-applies only after a git change, and anything edited in the admin console stays edited. That is the upstream default and it is what most people are unknowingly running.
+
+With the cache off, every scheduled run is a full apply, which is what makes the schedule correct drift. The cost is a full realm write against a live server on every tick, and config-cli takes no lock of its own — which is why the CronJob sets `concurrencyPolicy: Forbid`.
+
+## Version ceiling
+
+config-cli's image tag carries the Keycloak version its admin client was built against (`6.5.1-26.5.5`). The realm parser rejects unknown fields outright rather than ignoring them, so a Keycloak newer than the tag can fail the whole import on a single new realm key. Check the [published tags](https://hub.docker.com/r/adorsys/keycloak-config-cli/tags) before upgrading the server.
+
+{{ template "chart.valuesSection" . }}
+
+{{ template "chart.maintainersSection" . }}
+
+## License
+
+Apache-2.0. Copyright 2026 Sophotech s.r.o.
+
+Keycloak™ is a trademark of the Linux Foundation. This chart is not affiliated with, endorsed by, or supported by the Keycloak project.
