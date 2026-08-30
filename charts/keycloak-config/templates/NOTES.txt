@@ -1,0 +1,35 @@
+Realm {{ include "keycloak-config.realmName" . }} is being applied to {{ .Values.keycloak.url }}.
+
+Apply job:  {{ if .Values.apply.enabled }}{{ printf "%s-apply-%s" (include "keycloak-config.fullname" .) (include "keycloak-config.realmHash" .) | trunc 63 | trimSuffix "-" }}{{ else }}disabled{{ end }}
+Reconcile:  {{ if .Values.reconcile.enabled }}{{ .Values.reconcile.schedule }}{{ else }}disabled{{ end }}
+Prune:      {{ if .Values.prune.enabled }}enabled — users absent from the realm file are disabled{{ else }}disabled{{ end }}
+
+  kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=apply --tail=-1
+
+What this does and does not do:
+
+  Applied and enforced   realm settings, clients, client scopes, protocol
+                         mappers, realm and client roles, groups, and each
+                         user's role and group membership.
+
+  Created, not enforced  user passwords. Every password credential carries
+                         userLabel: initial, which makes it apply once at
+                         creation. That is what keeps a reconcile from
+                         re-hashing a password the person chose themselves.
+
+  Not done               deleting users. keycloak-config-cli cannot; it says
+                         so in its own logs. Removing a user from the file
+                         strips their roles and groups, so they lose access,
+                         but the account remains.
+{{ if not .Values.prune.enabled }}
+                         Set prune.enabled=true to disable those accounts as
+                         well.
+{{- else }}
+                         prune.enabled is on, so those accounts are disabled
+                         after each apply.
+{{- end }}
+{{ if .Values.reconcile.cache }}
+reconcile.cache is on, so a scheduled run does nothing while the realm file is
+unchanged — including after someone edits the realm in the admin console. If
+you meant the schedule to correct that drift, set reconcile.cache=false.
+{{- end }}
