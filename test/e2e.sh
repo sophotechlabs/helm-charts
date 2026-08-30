@@ -179,31 +179,34 @@ step "a password the user chose survives a reconcile"
 # required action reads as "Account is not fully set up"), and a test that
 # cannot tell those apart would report the wrong cause.
 #
-# Keycloak replaces the credential when it re-hashes, so the credential id is
-# the direct evidence. Step two below proves the measurement is sensitive
-# before step four relies on it.
-alice_credential() {
+# Keycloak updates the password credential in place rather than replacing it —
+# measured on 26.7.2: the credential id is stable across a set-password while
+# createdDate moves. So createdDate is the signal, and the id is not.
+#
+# The middle step exists to prove the measurement is sensitive before the last
+# one relies on it. It is what caught the id being the wrong field.
+alice_credential_date() {
   ID=$(kcadm get users -r "$REALM" -q username=alice -q exact=true --fields id --format csv --noquotes | tr -d '\r')
   [ -n "$ID" ] || fail "could not resolve alice"
-  kcadm get "users/$ID/credentials" -r "$REALM" --fields id --format csv --noquotes | tr -d '\r' | head -1
+  kcadm get "users/$ID/credentials" -r "$REALM" --fields createdDate --format csv --noquotes | tr -d '\r' | head -1
 }
 
-BEFORE=$(alice_credential)
+BEFORE=$(alice_credential_date)
 [ -n "$BEFORE" ] || fail "alice has no credential to start with"
-ok "credential before: $BEFORE"
+ok "credential createdDate before: $BEFORE"
 
 CHOSEN="alice-chose-this-$RANDOM$RANDOM"
 kcadm set-password -r "$REALM" --username alice --new-password "$CHOSEN"
-CHANGED=$(alice_credential)
-[ "$CHANGED" != "$BEFORE" ] || fail "changing the password out of band did not replace the credential, so this test cannot detect a rewrite"
-ok "password changed out of band, credential now $CHANGED"
+CHANGED=$(alice_credential_date)
+[ "$CHANGED" != "$BEFORE" ] || fail "changing the password out of band did not move the credential createdDate, so this test cannot detect a rewrite"
+ok "password changed out of band, createdDate now $CHANGED"
 
 k -n "$NS" delete job -l "app.kubernetes.io/instance=$CONFIG_RELEASE,app.kubernetes.io/component=apply" --ignore-not-found
 apply_realm --reuse-values --set reconcile.cache=false --set-file realm.spec="$WORK/realm.yaml"
 
-AFTER=$(alice_credential)
-[ "$AFTER" = "$CHANGED" ] || fail "the reconcile replaced alice's credential ($CHANGED -> $AFTER), so userLabel: initial did not make it create-only"
-ok "credential unchanged by the reconcile: $AFTER"
+AFTER=$(alice_credential_date)
+[ "$AFTER" = "$CHANGED" ] || fail "the reconcile rewrote alice's password (createdDate $CHANGED -> $AFTER), so userLabel: initial did not make the credential create-only"
+ok "password untouched by the reconcile, createdDate still $AFTER"
 
 step "removing a user from the file takes their access away"
 k -n "$NS" delete job -l "app.kubernetes.io/instance=$CONFIG_RELEASE,app.kubernetes.io/component=apply" --ignore-not-found
