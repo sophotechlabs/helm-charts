@@ -1,9 +1,10 @@
 ---
 apiVersion: v2
 name: keycloak-config
-description: Keeps a Keycloak realm — clients, scopes, roles, groups and users — matching a YAML file in git
+description: Keeps a Keycloak realm — clients, scopes, roles, groups and users —
+  matching a YAML file in git
 type: application
-version: 0.0.0
+version: 1.0.0
 appVersion: "6.5.1"
 home: https://github.com/sophotechlabs/helm-charts
 icon: https://raw.githubusercontent.com/keycloak/keycloak-misc/main/logo/icon.svg
