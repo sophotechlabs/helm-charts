@@ -1,0 +1,9 @@
+misconfigurations:
+  - id: KSV-0014
+    statement: >-
+      Root filesystem is writable on the default path, and deliberately so. A
+      non-optimized `kc.sh start` runs Keycloak's augmentation step on every
+      container start and writes the result under /opt/keycloak/lib/quarkus,
+      and the keycloak-config-cli JVM writes to its own root filesystem.
+      containerSecurityContext.readOnlyRootFilesystem is a value, the optimized
+      scenario sets it true, and the chart README says which path allows it.

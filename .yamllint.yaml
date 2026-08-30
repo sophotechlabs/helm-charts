@@ -3,6 +3,7 @@ extends: default
 
 ignore: |
   charts/*/templates/
+  dist/
 
 rules:
   line-length:
@@ -12,8 +13,10 @@ rules:
     min-spaces-from-content: 1
   truthy:
     check-keys: false
-  document-start:
-    present: false
+  # Workflows and manifests here open with ---, values files and test suites do
+  # not. Enforcing either way would be churn over a rule that carries no
+  # meaning.
+  document-start: disable
   braces:
     max-spaces-inside: 1
   octal-values:

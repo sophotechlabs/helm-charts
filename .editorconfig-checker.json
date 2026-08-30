@@ -1,0 +1,12 @@
+{
+  "Exclude": [
+    "^LICENSE$",
+    "^charts/[^/]+/LICENSE$",
+    "^charts/[^/]+/templates/NOTES\\.txt$",
+    "^CHANGELOG\\.md$",
+    "^charts/[^/]+/CHANGELOG\\.md$",
+    "\\.svg$",
+    "\\.png$"
+  ],
+  "IgnoreDefaults": false
+}

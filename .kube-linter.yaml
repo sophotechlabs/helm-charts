@@ -1,10 +1,40 @@
 ---
+# An explicit list rather than addAllBuiltIn plus a long exclude block. Most
+# built-in checks are opinions about a deployment (replica counts, affinity,
+# node placement, ownership labels) that belong to whoever installs the chart,
+# not to the chart. What is listed here is what the chart itself can get wrong.
 checks:
-  addAllBuiltIn: true
-  exclude:
-    # Rendered chart output carries no namespace; Helm and kubectl supply it.
-    - default-service-account
-    # Latest-tag is asserted by the schema instead: image.tag is required and
-    # rejected when it is "latest".
-    - unset-cpu-requirements
-customChecks: []
+  doNotAutoAddDefaults: true
+  include:
+    # container hardening
+    - privileged-container
+    - privilege-escalation-container
+    - run-as-non-root
+    - unsafe-proc-mount
+    - unsafe-sysctls
+    - drop-net-raw-capability
+    - privileged-ports
+    - ssh-port
+
+    # host isolation
+    - host-network
+    - host-pid
+    - host-ipc
+    - docker-sock
+    - writable-host-mount
+    - sensitive-host-mounts
+
+    # things that are simply wrong
+    - latest-tag
+    - duplicate-env-var
+    - invalid-target-ports
+    - mismatching-selector
+    - dangling-service
+    - non-existent-service-account
+    - deprecated-service-account-field
+    - unset-memory-requirements
+
+    # secrets and rbac
+    - env-var-secret
+    - cluster-admin-role-binding
+    - wildcard-in-rules

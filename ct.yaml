@@ -5,7 +5,10 @@ chart-dirs:
   - charts
 chart-repos: []
 helm-extra-args: --timeout 900s
-check-version-increment: true
+# release-please owns chart versions, so a pull request that changes a chart
+# deliberately does not bump Chart.yaml. Leaving this on would fail every one
+# of them.
+check-version-increment: false
 # The maintainer is a company, not a forge account, so the account-existence
 # check can never pass. Everything else ct lint asserts still runs.
 validate-maintainers: false

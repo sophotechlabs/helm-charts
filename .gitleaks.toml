@@ -1,0 +1,17 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated render output, reproduced by just render and never committed"
+paths = ['''^dist/''']
+
+[[allowlists]]
+description = """
+JDBC connection strings. The generic-api-key rule reads the query string on a
+jdbc:postgresql:// URL as a credential; these carry a host, a database name and
+connection options, and every password in this repo comes from a secretKeyRef.
+"""
+# Matched against the whole line: the rule reports a fragment of the URL as
+# the secret, so matching the finding itself would not catch it.
+regexTarget = "line"
+regexes = ['''jdbc:postgresql://''']
