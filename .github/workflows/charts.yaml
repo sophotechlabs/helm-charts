@@ -1,0 +1,94 @@
+---
+name: charts
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518
+      - run: just lint
+      - run: just ct-lint
+
+  unittest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518
+      - run: just unittest
+
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518
+      - run: just render
+      - run: just schema
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518
+      - run: just docs
+
+  # The realm file in git actually becomes users, groups and role mappings in a
+  # running Keycloak, a chosen password survives a reconcile, and a removed
+  # user loses access. Asserted against the server, not against templates.
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [lint, unittest, render]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518
+      - run: just kind-up
+      - run: just e2e
+      - if: failure()
+        run: |
+          kubectl -n keycloak-e2e get all
+          kubectl -n keycloak-e2e describe pods
+          kubectl -n keycloak-e2e logs -l app.kubernetes.io/name=keycloak --tail=200 || true
+          kubectl -n keycloak-e2e logs -l app.kubernetes.io/name=keycloak-config --tail=200 || true
+
+  # Runs on its own cluster with no CRDs installed, because checking the
+  # bare-cluster claim next to the operators would prove nothing.
+  e2e-bare:
+    runs-on: ubuntu-latest
+    needs: [lint, unittest, render]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@3c2e0cf82a5b2e5249f0d3635a4d83d0ae861518
+      - run: just kind-up
+      - run: just e2e-bare
+      - if: failure()
+        run: |
+          kubectl -n keycloak-bare get all
+          kubectl -n keycloak-bare describe pods
+          kubectl -n keycloak-bare logs -l app.kubernetes.io/name=keycloak --tail=200 || true
